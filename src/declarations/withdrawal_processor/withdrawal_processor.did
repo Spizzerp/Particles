@@ -1,0 +1,72 @@
+type ZKProof = 
+ record {
+   a: record {
+        text;
+        text;
+      };
+   b: record {
+        record {
+          text;
+          text;
+        };
+        record {
+          text;
+          text;
+        };
+      };
+   c: record {
+        text;
+        text;
+      };
+   publicSignals: vec text;
+ };
+type Withdrawal = 
+ record {
+   amount: Amount;
+   chainId: ChainId;
+   id: nat;
+   merkleRoot: MerkleRoot;
+   nullifier: NullifierHash;
+   proof: ZKProof;
+   recipient: text;
+   timestamp: Time;
+   tokenId: TokenId;
+ };
+type TokenId = text;
+type Time = int;
+type Result_2 = 
+ variant {
+   err: text;
+   ok: vec nat;
+ };
+type Result_1 = 
+ variant {
+   err: text;
+   ok: nat;
+ };
+type Result = 
+ variant {
+   err: text;
+   ok;
+ };
+type NullifierHash = text;
+type MerkleRoot = text;
+type ChainId = nat;
+type Amount = nat;
+service : {
+  batchProcessWithdrawals: (vec nat) -> (Result_2);
+  getPendingWithdrawals: () -> (vec Withdrawal) query;
+  getProcessedWithdrawals: () -> (vec Withdrawal) query;
+  getWithdrawal: (nat) -> (opt Withdrawal) query;
+  getWithdrawalStats: () ->
+   (record {
+      pending: nat;
+      processed: nat;
+      total: nat;
+    }) query;
+  getWithdrawalsByChain: (ChainId) -> (vec Withdrawal) query;
+  initiateWithdrawal: (NullifierHash, text, Amount, TokenId, ChainId,
+   MerkleRoot, ZKProof) -> (Result_1);
+  isNullifierUsed: (NullifierHash) -> (bool) query;
+  processWithdrawal: (nat) -> (Result);
+}

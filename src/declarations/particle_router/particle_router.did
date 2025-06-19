@@ -1,0 +1,35 @@
+type TokenId = text;
+type Route = 
+ record {
+   amount: Amount;
+   destChain: ChainId;
+   fee: Amount;
+   sourceChain: ChainId;
+   tokenId: TokenId;
+ };
+type Result_2 = 
+ variant {
+   err: text;
+   ok: text;
+ };
+type Result_1 = 
+ variant {
+   err: text;
+   ok: Route;
+ };
+type Result = 
+ variant {
+   err: text;
+   ok;
+ };
+type ChainId = nat;
+type Amount = nat;
+service : {
+  addLiquidity: (ChainId, TokenId, Amount) -> (Result);
+  createRoute: (ChainId, ChainId, TokenId, Amount) -> (Result_2);
+  findOptimalRoute: (ChainId, ChainId, TokenId, Amount) -> (Result_1);
+  getAvailableRoutes: (ChainId) -> (vec Route) query;
+  getLiquidity: (ChainId, TokenId) -> (nat) query;
+  getRoute: (ChainId, ChainId, TokenId) -> (opt Route) query;
+  removeLiquidity: (ChainId, TokenId, Amount) -> (Result);
+}

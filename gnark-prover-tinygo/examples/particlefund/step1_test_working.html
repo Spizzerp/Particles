@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Particle Fund - Step 1: Nullifier-Only Circuit Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .input-group {
+            margin: 20px 0;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            font-family: monospace;
+            margin: 5px 0;
+        }
+        button {
+            padding: 10px 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:disabled {
+            background: #ccc;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 5px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .error {
+            color: red;
+        }
+        .success {
+            color: green;
+        }
+        .info {
+            background: #e3f2fd;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔬 Step 1: Nullifier-Only Circuit Test</h1>
+    
+    <div class="info">
+        <strong>Circuit Details:</strong><br>
+        - Constraints: 442<br>
+        - Proves: Hash(nullifier) == nullifierHash<br>
+        - Hash Function: MiMC<br>
+        - Curve: BN254<br>
+        - Status: <span id="circuitStatus">Loading...</span>
+    </div>
+
+    <div class="input-group">
+        <label>Nullifier (Private Input):</label>
+        <input type="text" id="nullifier" placeholder="0x123..." value="0x0000000000000000000000000000000000000000000000000000000000000001">
+    </div>
+
+    <div class="input-group">
+        <label>Nullifier Hash (Public Input):</label>
+        <input type="text" id="nullifierHash" placeholder="0xabc..." readonly>
+        <button onclick="computeHash()">Compute Hash</button>
+    </div>
+
+    <button id="generateBtn" disabled>Generate PLONK Proof</button>
+
+    <div id="status" class="status"></div>
+
+    <!-- Load Go's wasm_exec.js -->
+    <script src="../../artifacts/wasm_exec_go.js"></script>
+    
+    <script>
+        let go;
+        
+        function log(msg, type = 'info') {
+            const status = document.getElementById('status');
+            const timestamp = new Date().toLocaleTimeString();
+            status.innerHTML += `<div class="${type}">[${timestamp}] ${msg}</div>`;
+            status.scrollTop = status.scrollHeight;
+            console.log(`[${type}] ${msg}`);
+        }
+
+        async function init() {
+            try {
+                log('Initializing Step 1 circuit...');
+                
+                // Create Go instance
+                go = new Go();
+                
+                // Load WASM
+                log('Loading WASM file...');
+                const response = await fetch('./particlefund_step1_standard.wasm');
+                const wasmBuffer = await response.arrayBuffer();
+                log(`WASM loaded: ${(wasmBuffer.byteLength / 1024 / 1024).toFixed(2)}MB`);
+                
+                // Create custom import object that maps "gojs" to Go's imports
+                const customImportObject = {
+                    gojs: {},
+                    go: go.importObject.go
+                };
+                
+                // Copy all Go imports to gojs namespace
+                if (go.importObject.go) {
+                    for (const [key, value] of Object.entries(go.importObject.go)) {
+                        customImportObject.gojs[key] = value;
+                    }
+                    log(`Mapped ${Object.keys(customImportObject.gojs).length} imports to gojs namespace`);
+                }
+                
+                // Instantiate with custom imports
+                log('Instantiating WASM...');
+                const result = await WebAssembly.instantiate(wasmBuffer, customImportObject);
+                
+                // Set up Go's reference to the instance
+                go._inst = result.instance;
+                
+                // Run the Go program
+                go.run(result.instance);
+                
+                log('✓ WASM initialized successfully', 'success');
+                
+                // Wait for initialization
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Debug: Check what's actually on window
+                console.log('Functions on window:', Object.keys(window).filter(k => k.includes('Proof') || k.includes('Circuit')));
+                
+                // Check functions
+                if (window.generateProof) {
+                    log('✓ generateProof function available', 'success');
+                    const btn = document.getElementById('generateBtn');
+                    btn.disabled = false;
+                    btn.addEventListener('click', handleGenerateProof);
+                } else {
+                    log('⚠️ generateProof not found', 'error');
+                }
+                
+                if (window.getCircuitInfo) {
+                    const info = window.getCircuitInfo();
+                    log(`Circuit: ${info}`, 'info');
+                    document.getElementById('circuitStatus').textContent = 'Ready';
+                    document.getElementById('circuitStatus').style.color = 'green';
+                }
+                
+                // Compute initial hash
+                computeHash();
+                
+            } catch (err) {
+                log(`Error: ${err.message}`, 'error');
+                console.error(err);
+                document.getElementById('circuitStatus').textContent = 'Error';
+                document.getElementById('circuitStatus').style.color = 'red';
+            }
+        }
+
+        function computeHash() {
+            const nullifier = document.getElementById('nullifier').value;
+            
+            // Simple hash simulation (not actual MiMC)
+            let hash = BigInt(nullifier);
+            for (let i = 0; i < 5; i++) {
+                hash = (hash * hash + BigInt(i)) % (BigInt(2) ** BigInt(254));
+            }
+            
+            const hashHex = '0x' + hash.toString(16).padStart(64, '0');
+            document.getElementById('nullifierHash').value = hashHex;
+            log(`Computed hash: ${hashHex.substring(0, 10)}...${hashHex.substring(hashHex.length - 6)}`);
+        }
+
+        async function handleGenerateProof() {
+            console.log('handleGenerateProof called - JavaScript function');
+            log('Generate button clicked!');
+            const btn = document.getElementById('generateBtn');
+            btn.disabled = true;
+            
+            try {
+                const nullifier = document.getElementById('nullifier').value;
+                const nullifierHash = document.getElementById('nullifierHash').value;
+                
+                log('Preparing witness...');
+                
+                const witness = {
+                    nullifier: nullifier,
+                    nullifierHash: nullifierHash
+                };
+                
+                const witnessJson = JSON.stringify(witness);
+                const witnessBytes = new TextEncoder().encode(witnessJson);
+                
+                log(`Witness: ${witnessJson.substring(0, 50)}...`);
+                log('Calling generateProof...');
+                
+                const startTime = Date.now();
+                
+                if (window.generateProof) {
+                    // Ensure it's a Uint8Array
+                    const uint8Array = new Uint8Array(witnessBytes);
+                    console.log('Type check:', uint8Array instanceof Uint8Array);
+                    console.log('Constructor:', uint8Array.constructor.name);
+                    console.log('Length:', uint8Array.length);
+                    const result = window.generateProof(uint8Array);
+                    
+                    if (result && result.success) {
+                        const elapsed = Date.now() - startTime;
+                        log(`✓ Proof generated successfully!`, 'success');
+                        log(`Time: ${result.timeMs || elapsed}ms`);
+                        log(`Proof size: ${(result.proof.length / 2)} bytes`);
+                        log(`Proof (hex): ${result.proof.substring(0, 64)}...`);
+                        log(`Circuit: ${result.circuit}, Constraints: ${result.constraints}`);
+                        
+                        if (result.publicWitness) {
+                            log(`Public witness: ${result.publicWitness}`);
+                        }
+                    } else {
+                        log(`Error: ${result ? result.error : 'Unknown error'}`, 'error');
+                    }
+                } else {
+                    log('Error: window.generateProof not available', 'error');
+                }
+                
+            } catch (err) {
+                log(`Error: ${err.message}`, 'error');
+                console.error(err);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // Initialize on load
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "src/canisters/plonk_verifier_on_icp_backend",
+]
+resolver = "2"

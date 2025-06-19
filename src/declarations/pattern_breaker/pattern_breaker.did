@@ -1,0 +1,88 @@
+type ZKProof = 
+ record {
+   a: record {
+        text;
+        text;
+      };
+   b: record {
+        record {
+          text;
+          text;
+        };
+        record {
+          text;
+          text;
+        };
+      };
+   c: record {
+        text;
+        text;
+      };
+   publicSignals: vec text;
+ };
+type Withdrawal = 
+ record {
+   amount: Amount;
+   chainId: ChainId;
+   id: nat;
+   merkleRoot: MerkleRoot;
+   nullifier: NullifierHash;
+   proof: ZKProof;
+   recipient: text;
+   timestamp: Time;
+   tokenId: TokenId;
+ };
+type TokenId = text;
+type Time = int;
+type Route = 
+ record {
+   amount: Amount;
+   destChain: ChainId;
+   fee: Amount;
+   sourceChain: ChainId;
+   tokenId: TokenId;
+ };
+type Result_1 = 
+ variant {
+   err: text;
+   ok: Route;
+ };
+type Result = 
+ variant {
+   err: text;
+   ok: vec text;
+ };
+type PatternData = 
+ record {
+   deposits: vec Deposit;
+   patterns: vec text;
+   user: principal;
+   withdrawals: vec Withdrawal;
+ };
+type NullifierHash = text;
+type MerkleRoot = text;
+type Deposit = 
+ record {
+   amount: Amount;
+   chainId: ChainId;
+   commitment: CommitmentHash;
+   id: nat;
+   leafIndex: nat;
+   timestamp: Time;
+   tokenId: TokenId;
+   user: principal;
+ };
+type CommitmentHash = text;
+type ChainId = nat;
+type Amount = nat;
+service : {
+  analyzeUserPattern: (principal, vec Deposit, vec Withdrawal) -> (Result);
+  applyObfuscation: (Route, vec text) -> (Result_1);
+  generateObfuscationStrategy: (vec text) -> (Result);
+  getGlobalPatternFrequency: (text) -> (nat) query;
+  getMostCommonPatterns: () -> (vec record {
+                                      text;
+                                      nat;
+                                    }) query;
+  getUserPatterns: (principal) -> (opt PatternData) query;
+}
