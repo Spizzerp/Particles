@@ -67,12 +67,38 @@ Each step adds complexity while maintaining working client-side proof generation
   - ✓ Mock proof generation: 20ms
   - ✓ Public signals correctly computed
 
-### ⏳ Step 3: Basic Merkle Circuit
-- **Status**: PENDING
-- **Constraints**: ~100-200
+### ✅ Step 3: Basic Merkle Circuit
+- **Status**: COMPLETE & TESTED ✓✓
+- **Constraints**: 4,547 (actual)
 - **Proves**: "My commitment is in a small Merkle tree"
 - **Adds**: 5-level Merkle tree verification
 - **Success Criteria**: Can prove membership in small tree
+- **Files**:
+  - [x] Created `circuits/particlefund/merkle_basic.go`
+  - [x] Created `circuits/particlefund/merkle_basic_test.go`
+  - [x] Created `examples/particlefund/setup/step3_setup.go`
+  - [x] Created `wasm/particlefund/main_step3_standard.go`
+  - [x] Created `examples/particlefund/step3_test.html`
+  - [x] Created `build_step3.sh`
+  - [x] Run setup and generate artifacts
+  - [x] Build WASM and test in browser
+- **Artifacts**:
+  - Constraint system: 289.96 KB
+  - SRS: 289.96 KB
+  - Proving key: 842.42 KB ✓
+  - Verification key: 0.38 KB ✓
+  - WASM binary: 6.36 MB ✓
+- **Browser Test Results**:
+  - ✓ WASM loads successfully
+  - ✓ Builds Merkle tree with real MiMC hashes
+  - ✓ Generates correct Merkle path for 5 levels
+  - ✓ Root Match: true (path verification works)
+  - ✓ Mock proof generation: ~17ms
+- **Key Features**:
+  - Tree capacity: 32 leaves (2^5)
+  - Uses MiMC hash throughout
+  - Includes leaf index range check (0-31)
+  - Bit extraction for path ordering
 
 ### ⏳ Step 4: Full Merkle Circuit
 - **Status**: PENDING
@@ -98,7 +124,20 @@ Each step adds complexity while maintaining working client-side proof generation
 - Created test HTML page for browser testing
 - **Step 1 COMPLETE** ✓
 
-### Next: Step 2 - Commitment Circuit
-- Will add secret input
-- Prove knowledge of (secret, nullifier) pair
-- Expected constraints: ~880 (double of step 1)
+### 2024-06-21 - Step 2 Complete
+- Added secret input to circuit
+- Proves knowledge of (secret, nullifier) pair
+- Actual constraints: 992
+- Successfully tested in browser with real MiMC hashes
+
+### 2024-06-22 - Step 3 Complete
+- Added 5-level Merkle tree verification
+- Proves commitment inclusion in tree
+- Actual constraints: 4,547 (higher than expected due to bit extraction)
+- Tree builder generates correct paths
+- Root verification working perfectly
+
+### Next: Step 4 - Full Merkle Circuit
+- Expand to 20-level tree
+- Support 1M+ deposits
+- Expected constraints: ~18,000
