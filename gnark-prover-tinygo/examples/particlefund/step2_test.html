@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Particle Fund - Step 2: Commitment Circuit Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #0f0;
+        }
+        h1, h2 { color: #0f0; }
+        .container {
+            background: #0a0a0a;
+            border: 1px solid #0f0;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        input, button {
+            background: #000;
+            color: #0f0;
+            border: 1px solid #0f0;
+            padding: 10px;
+            margin: 5px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        button:hover {
+            background: #0f0;
+            color: #000;
+            cursor: pointer;
+        }
+        #console {
+            background: #000;
+            border: 1px solid #0f0;
+            padding: 10px;
+            height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            font-size: 12px;
+        }
+        .success { color: #0f0; }
+        .error { color: #f00; }
+        .info { color: #ff0; }
+        .input-group {
+            margin: 10px 0;
+        }
+        label {
+            display: inline-block;
+            width: 150px;
+        }
+        input[type="text"] {
+            width: 300px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚀 Particle Fund - Step 2: Commitment Circuit</h1>
+    
+    <div class="container">
+        <h2>Circuit Information</h2>
+        <p>This circuit proves knowledge of a (secret, nullifier) pair that creates a commitment.</p>
+        <p>Public inputs: commitment, nullifierHash</p>
+        <p>Private inputs: secret, nullifier</p>
+        <p>Constraints: 992</p>
+    </div>
+
+    <div class="container">
+        <h2>Proof Generation</h2>
+        <div class="input-group">
+            <label for="secret">Secret:</label>
+            <input type="text" id="secret" value="123456789" />
+        </div>
+        <div class="input-group">
+            <label for="nullifier">Nullifier:</label>
+            <input type="text" id="nullifier" value="987654321" />
+        </div>
+        <button onclick="handleGenerateProof()">Generate Proof</button>
+        <button onclick="handleGetInfo()">Get Circuit Info</button>
+        <button onclick="clearConsole()">Clear Console</button>
+    </div>
+
+    <div class="container">
+        <h2>Console Output</h2>
+        <div id="console"></div>
+    </div>
+
+    <script src="wasm_exec.js"></script>
+    <script>
+        const consoleDiv = document.getElementById('console');
+        
+        function log(message, className = '') {
+            const timestamp = new Date().toLocaleTimeString();
+            const line = document.createElement('div');
+            line.className = className;
+            line.textContent = `[${timestamp}] ${message}`;
+            consoleDiv.appendChild(line);
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+        }
+
+        function clearConsole() {
+            consoleDiv.innerHTML = '';
+            log('Console cleared', 'info');
+        }
+
+        // Override console.log to capture WASM output
+        const originalLog = console.log;
+        console.log = function(...args) {
+            originalLog(...args);
+            log(args.join(' '));
+        };
+
+        async function loadWasm() {
+            try {
+                log('Loading Step 2 WASM module...', 'info');
+                
+                const go = new Go();
+                const response = await fetch('particlefund_step2_standard.wasm?t=' + Date.now());
+                const buffer = await response.arrayBuffer();
+                
+                log(`WASM loaded: ${(buffer.byteLength / 1024 / 1024).toFixed(2)}MB`, 'info');
+                
+                // Create custom import object that maps "gojs" to Go's imports
+                const customImportObject = {
+                    gojs: {},
+                    go: go.importObject.go
+                };
+                
+                // Copy all Go imports to gojs namespace
+                if (go.importObject.go) {
+                    for (const [key, value] of Object.entries(go.importObject.go)) {
+                        customImportObject.gojs[key] = value;
+                    }
+                    log(`Mapped ${Object.keys(customImportObject.gojs).length} imports to gojs namespace`);
+                }
+                
+                // Instantiate with custom imports
+                const result = await WebAssembly.instantiate(buffer, customImportObject);
+                
+                log('WASM module instantiated successfully', 'success');
+                go.run(result.instance);
+                
+                // Give WASM time to initialize
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                if (typeof generateProof === 'function' && typeof getCircuitInfo === 'function') {
+                    log('Step 2 circuit functions registered successfully', 'success');
+                } else {
+                    log('Warning: Circuit functions not found', 'error');
+                }
+                
+            } catch (error) {
+                log(`Error loading WASM: ${error.message}`, 'error');
+                console.error(error);
+            }
+        }
+
+        async function handleGenerateProof() {
+            log('Generate proof button clicked', 'info');
+            
+            if (!window.generateProof || typeof window.generateProof !== 'function') {
+                log('Error: generateProof function not available', 'error');
+                return;
+            }
+            
+            try {
+                const secret = document.getElementById('secret').value;
+                const nullifier = document.getElementById('nullifier').value;
+                
+                log(`Generating proof with secret=${secret}, nullifier=${nullifier}...`, 'info');
+                
+                const inputs = {
+                    secret: secret,
+                    nullifier: nullifier
+                };
+                
+                const start = performance.now();
+                const result = window.generateProof(JSON.stringify(inputs));
+                const end = performance.now();
+                
+                log(`Result type: ${typeof result}`, 'info');
+                log(`Result: ${result}`, 'info');
+                
+                if (result.startsWith('Error:')) {
+                    log(result, 'error');
+                    return;
+                }
+                
+                const output = JSON.parse(result);
+                
+                log(`Proof generated in ${(end - start).toFixed(2)}ms`, 'success');
+                log(`Proof: ${output.proof}`, 'success');
+                log(`Public Signals:`, 'info');
+                log(`  - Commitment: ${output.publicSignals[0]}`, 'info');
+                log(`  - NullifierHash: ${output.publicSignals[1]}`, 'info');
+                
+            } catch (error) {
+                log(`Error generating proof: ${error.message}`, 'error');
+                console.error(error);
+            }
+        }
+
+        function handleGetInfo() {
+            try {
+                const info = JSON.parse(window.getCircuitInfo());
+                log('Circuit Information:', 'info');
+                Object.entries(info).forEach(([key, value]) => {
+                    if (Array.isArray(value)) {
+                        log(`  ${key}: [${value.join(', ')}]`);
+                    } else {
+                        log(`  ${key}: ${value}`);
+                    }
+                });
+            } catch (error) {
+                log(`Error getting circuit info: ${error.message}`, 'error');
+            }
+        }
+
+        // Load WASM on page load
+        window.addEventListener('load', loadWasm);
+    </script>
+</body>
+</html>

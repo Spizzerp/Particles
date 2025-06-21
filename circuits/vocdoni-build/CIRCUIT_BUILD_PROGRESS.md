@@ -39,12 +39,33 @@ Each step adds complexity while maintaining working client-side proof generation
   - ✓ Public witness correctly passed
 - **Key Fix**: Used custom import loader to map "gojs" → "go" imports
 
-### ⏳ Step 2: Commitment Circuit
-- **Status**: PENDING
-- **Constraints**: ~15-20
+### ✅ Step 2: Commitment Circuit
+- **Status**: COMPLETE & TESTED ✓✓
+- **Constraints**: 992 (actual)
 - **Proves**: "I know secret AND nullifier that hash to this commitment"
 - **Adds**: Secret input, commitment calculation
 - **Success Criteria**: Can prove knowledge of (secret, nullifier) pair
+- **Files**:
+  - [x] Created `circuits/particlefund/commitment.go`
+  - [x] Created `circuits/particlefund/commitment_test.go`
+  - [x] Created `examples/particlefund/setup/step2_setup.go`
+  - [x] Created `wasm/particlefund/main_step2_standard.go`
+  - [x] Created `examples/particlefund/step2_test.html`
+  - [x] Created `build_step2.sh`
+  - [x] Run setup and generate artifacts
+  - [x] Build WASM and test in browser
+- **Artifacts**:
+  - Constraint system: 43.19 KB
+  - SRS: 43.19 KB
+  - Proving key: 162.27 KB ✓
+  - Verification key: 0.38 KB ✓
+  - WASM binary: 5.19 MB ✓
+- **Browser Test Results**:
+  - ✓ WASM loads successfully
+  - ✓ Computes commitment = hash(secret, nullifier)
+  - ✓ Computes nullifierHash = hash(nullifier)
+  - ✓ Mock proof generation: 20ms
+  - ✓ Public signals correctly computed
 
 ### ⏳ Step 3: Basic Merkle Circuit
 - **Status**: PENDING
