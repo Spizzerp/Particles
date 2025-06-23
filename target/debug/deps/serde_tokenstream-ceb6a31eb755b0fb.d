@@ -1,0 +1,10 @@
+/Users/spizzerp/ParticleFund/target/debug/deps/libserde_tokenstream-ceb6a31eb755b0fb.rmeta: /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/lib.rs /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/ibidem.rs /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/ordered_map.rs /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/serde_tokenstream.rs
+
+/Users/spizzerp/ParticleFund/target/debug/deps/libserde_tokenstream-ceb6a31eb755b0fb.rlib: /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/lib.rs /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/ibidem.rs /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/ordered_map.rs /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/serde_tokenstream.rs
+
+/Users/spizzerp/ParticleFund/target/debug/deps/serde_tokenstream-ceb6a31eb755b0fb.d: /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/lib.rs /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/ibidem.rs /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/ordered_map.rs /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/serde_tokenstream.rs
+
+/Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/lib.rs:
+/Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/ibidem.rs:
+/Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/ordered_map.rs:
+/Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/serde_tokenstream.rs:

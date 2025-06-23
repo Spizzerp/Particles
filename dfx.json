@@ -21,6 +21,11 @@
       "type": "motoko",
       "main": "src/canisters/CryptoComponents.mo"
     },
+    "crypto_components_v2": {
+      "type": "motoko",
+      "main": "src/canisters/CryptoComponentsV2.mo",
+      "dependencies": ["hash_canister"]
+    },
     "chain_fusion_manager": {
       "type": "motoko",
       "main": "src/canisters/ChainFusionManager.mo"
@@ -45,6 +50,11 @@
       "type": "rust",
       "candid": "src/canisters/plonk_verifier_on_icp_backend/plonk_verifier_on_icp_backend.did",
       "package": "plonk_verifier_on_icp_backend"
+    },
+    "hash_canister": {
+      "type": "rust",
+      "candid": "src/canisters/hash_canister/src/hash_canister.did",
+      "package": "hash_canister"
     }
   },
   "defaults": {
