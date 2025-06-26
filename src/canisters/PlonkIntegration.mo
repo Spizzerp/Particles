@@ -10,6 +10,7 @@ import Nat "mo:base/Nat";
 import Char "mo:base/Char";
 import Error "mo:base/Error";
 import Types "../types/Types";
+import Debug "mo:base/Debug";
 
 /// PLONK Verifier Integration for Particle Fund
 /// 
@@ -19,7 +20,7 @@ module {
     
     // PLONK verifier canister ID (local)
     // Update this with your deployed verifier canister ID
-    public let PLONK_VERIFIER_CANISTER = "avqkn-guaaa-aaaaa-qaaea-cai";
+    public let PLONK_VERIFIER_CANISTER = "asrmz-lmaaa-aaaaa-qaaeq-cai";
     
     // Interface to the PLONK verifier canister
     public type PlonkVerifier = actor {
@@ -129,18 +130,25 @@ module {
         buffer.add(Nat8.fromNat(claimedValuesLen % 256));            // & 0xFF
         
         // 6. Batched proof values
-        for (value in proof.batched_proof.claimed_values.vals()) {
+        Debug.print("Serializing " # Nat.toText(claimedValuesLen) # " claimed values");
+        for (i in Iter.range(0, claimedValuesLen - 1)) {
+            let value = proof.batched_proof.claimed_values[i];
+            Debug.print("  Claimed value " # Nat.toText(i) # ": " # value # " (length: " # Nat.toText(Text.size(value)) # ")");
             switch (hexToBytes(value)) {
                 case (#ok(bytes)) {
-                    let size = Nat.min(32, bytes.size());
-                    for (i in Iter.range(0, size - 1)) {
-                        buffer.add(bytes[i]);
+                    Debug.print("    Converted to " # Nat.toText(bytes.size()) # " bytes");
+                    if (bytes.size() != 32) {
+                        Debug.print("    WARNING: Expected 32 bytes!");
                     };
-                    for (i in Iter.range(size, 31)) {
+                    let size = Nat.min(32, bytes.size());
+                    for (j in Iter.range(0, size - 1)) {
+                        buffer.add(bytes[j]);
+                    };
+                    for (j in Iter.range(size, 31)) {
                         buffer.add(0);
                     };
                 };
-                case (#err(e)) { return #err("Failed to serialize claimed value: " # e); };
+                case (#err(e)) { return #err("Failed to serialize claimed value " # Nat.toText(i) # ": " # e); };
             };
         };
         
@@ -184,22 +192,44 @@ module {
     
     /// Convert public inputs to witness bytes
     public func serializeWitness(publicInputs: [Text]) : Result.Result<[Nat8], Text> {
-        let buffer = Buffer.Buffer<Nat8>(publicInputs.size() * 32);
+        let buffer = Buffer.Buffer<Nat8>(12 + publicInputs.size() * 32); // 12 bytes header + 32 bytes per input
         
-        // Each public input is a field element (32 bytes)
+        // Write witness header FIRST according to gnark format:
+        // 4 bytes: number of public inputs
+        let numPublic = publicInputs.size();
+        buffer.add(Nat8.fromNat(numPublic / 16777216 % 256)); // >> 24
+        buffer.add(Nat8.fromNat(numPublic / 65536 % 256));    // >> 16
+        buffer.add(Nat8.fromNat(numPublic / 256 % 256));      // >> 8
+        buffer.add(Nat8.fromNat(numPublic % 256));            // & 0xFF
+        
+        // 4 bytes: number of secret inputs (0 for public witness)
+        buffer.add(0);
+        buffer.add(0);
+        buffer.add(0);
+        buffer.add(0);
+        
+        // 4 bytes: vector length (same as public inputs)
+        buffer.add(Nat8.fromNat(numPublic / 16777216 % 256)); // >> 24
+        buffer.add(Nat8.fromNat(numPublic / 65536 % 256));    // >> 16
+        buffer.add(Nat8.fromNat(numPublic / 256 % 256));      // >> 8
+        buffer.add(Nat8.fromNat(numPublic % 256));            // & 0xFF
+        
+        // THEN write the actual public inputs (32 bytes each)
         for (input in publicInputs.vals()) {
-            // Convert hex string to bytes
             switch (hexToBytes(input)) {
                 case (#ok(bytes)) {
+                    if (bytes.size() != 32) {
+                        return #err("Public input must be exactly 32 bytes, got " # Nat.toText(bytes.size()) # " for: " # input);
+                    };
                     for (byte in bytes.vals()) {
                         buffer.add(byte);
                     };
                 };
-                case (#err(e)) { return #err(e); };
+                case (#err(e)) { return #err("Failed to convert public input: " # e); };
             };
         };
         
-        #ok(Buffer.toArray(buffer))
+        #ok(Buffer.toArray(buffer));
     };
     
     /// Verify a PLONK proof using the external verifier
@@ -228,7 +258,7 @@ module {
                 vkBytes,
                 proofBytes,
                 witnessBytes,
-                false // vk_has_lines
+                true // vk_has_lines - set to true since our VK is 34KB and includes lines
             );
             
             #ok(isValid)

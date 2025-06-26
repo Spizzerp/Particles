@@ -9,6 +9,8 @@ import Iter "mo:base/Iter";
 import Hash "mo:base/Hash";
 import Types "../types/Types";
 import PlonkIntegration "./PlonkIntegration";
+import Debug "mo:base/Debug";
+import Nat8 "mo:base/Nat8";
 
 actor WithdrawalProcessor {
     private stable var nextWithdrawalId : Nat = 0;
@@ -122,26 +124,93 @@ actor WithdrawalProcessor {
             return #err("PLONK verification key not set");
         };
         
-        // Format public inputs
+        // Format public inputs - all must be valid hex strings
+        // The PLONK verifier expects hex strings, not decimal strings
         let publicInputs = [
-            merkleRoot,
-            nullifierHash,
-            recipient,
-            Nat.toText(amount),
-            "0x0000000000000000000000000000000000000000", // relayer
-            "0", // fee
-            "0"  // refund
+            merkleRoot,     // Already hex
+            nullifierHash,  // Already hex
+            padAddressTo32Bytes(recipient),      // Pad Ethereum address to 32 bytes
+            natToHex(amount), // Convert amount to hex
+            padAddressTo32Bytes("0x0000000000000000000000000000000000000000"), // relayer (zero address) - pad to 32 bytes
+            "0x0000000000000000000000000000000000000000000000000000000000000000", // fee (32 bytes)
+            "0x0000000000000000000000000000000000000000000000000000000000000000"  // refund (32 bytes)
         ];
         
-        // Verify using PLONK verifier canister
-        let result = await PlonkIntegration.verifyWithPlonk(
+        // Debug the public inputs
+        Debug.print("Public inputs being sent to verifier:");
+        for (i in Iter.range(0, publicInputs.size() - 1)) {
+            Debug.print("  Input " # Nat.toText(i) # ": " # publicInputs[i] # " (length: " # Nat.toText(Text.size(publicInputs[i])) # ")");
+        };
+        
+        // Serialize the proof
+        let proofBytesResult = PlonkIntegration.serializeProof(proof);
+        let proofBytes = switch (proofBytesResult) {
+            case (#ok(bytes)) bytes;
+            case (#err(e)) {
+                Debug.print("Failed to serialize proof: " # e);
+                return #err(e);
+            };
+        };
+        Debug.print("Serialized proof bytes: " # Nat.toText(proofBytes.size()));
+        
+        // Serialize the witness (public inputs)
+        let witnessBytesResult = PlonkIntegration.serializeWitness(publicInputs);
+        let witnessBytes = switch (witnessBytesResult) {
+            case (#ok(bytes)) bytes;
+            case (#err(e)) {
+                Debug.print("Failed to serialize witness: " # e);
+                return #err(e);
+            };
+        };
+        Debug.print("Serialized witness bytes: " # Nat.toText(witnessBytes.size()));
+        
+        // Debug first few bytes of witness to check header
+        Debug.print("Witness header (first 12 bytes):");
+        for (i in Iter.range(0, 11)) {
+            if (i < witnessBytes.size()) {
+                Debug.print("  Byte " # Nat.toText(i) # ": " # Nat.toText(Nat8.toNat(witnessBytes[i])));
+            };
+        };
+        
+        // Call the PLONK verifier
+        Debug.print("Calling PLONK verifier...");
+        let plonkResult = await PlonkIntegration.verifyWithPlonk(
             plonkVerifier,
             plonkVkBytes,
             proof,
             publicInputs
         );
         
-        result
+        plonkResult
+    };
+    
+    // Helper function to convert Nat to hex string
+    private func natToHex(n: Nat) : Text {
+        if (n == 0) {
+            return "0x0000000000000000000000000000000000000000000000000000000000000000";
+        };
+        
+        var hex = "";
+        var num = n;
+        let hexChars = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"];
+        
+        // Convert to hex
+        while (num > 0) {
+            hex := hexChars[num % 16] # hex;
+            num := num / 16;
+        };
+        
+        // Ensure even length
+        if (Text.size(hex) % 2 == 1) {
+            hex := "0" # hex;
+        };
+        
+        // Pad to 32 bytes (64 hex chars)
+        while (Text.size(hex) < 64) {
+            hex := "0" # hex;
+        };
+        
+        "0x" # hex
     };
     
     // Convert PLONK proof to legacy ZKProof type for compatibility
@@ -203,5 +272,28 @@ actor WithdrawalProcessor {
             cycles = 500_000_000_000;    // 500B cycles
             usdCost = 0.08;              // ~$0.08 at current rates
         }
+    };
+    
+    // Helper function to pad Ethereum addresses to 32 bytes
+    private func padAddressTo32Bytes(address: Text) : Text {
+        var cleanAddr = address;
+        if (Text.startsWith(address, #text "0x")) {
+            cleanAddr := Text.trimStart(address, #text "0x");
+        };
+        
+        // If already 64 chars (32 bytes), return as is
+        if (Text.size(cleanAddr) == 64) {
+            return "0x" # cleanAddr;
+        };
+        
+        // Ethereum addresses are 20 bytes (40 hex chars)
+        // Pad with leading zeros to make 32 bytes (64 hex chars)
+        let padding = 64 - Text.size(cleanAddr);
+        var padded = "";
+        for (i in Iter.range(0, padding - 1)) {
+            padded := padded # "0";
+        };
+        
+        "0x" # padded # cleanAddr
     };
 }

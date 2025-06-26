@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Constraint Count Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #00ff00; }
+        button { background: #00ff00; color: black; border: none; padding: 10px 20px; margin: 10px; cursor: pointer; }
+        .output { background: #000; padding: 15px; margin: 10px 0; border: 1px solid #00ff00; }
+    </style>
+</head>
+<body>
+    <h1>Production Circuit Constraint Count</h1>
+    <button onclick="testConstraints()">Test Circuit Compilation</button>
+    <div class="output" id="output"></div>
+
+    <script src="/wasm/wasm_exec.js"></script>
+    <script>
+        async function testConstraints() {
+            const output = document.getElementById('output');
+            output.textContent = 'Loading WASM...\n';
+            
+            const go = new Go();
+            const response = await fetch('/wasm/production_demo.wasm');
+            const buffer = await response.arrayBuffer();
+            const result = await WebAssembly.instantiate(buffer, go.importObject);
+            
+            // Capture console output
+            const originalLog = console.log;
+            console.log = (msg) => {
+                output.textContent += msg + '\n';
+                originalLog(msg);
+            };
+            
+            go.run(result.instance);
+            
+            // Wait and call initialize
+            setTimeout(() => {
+                if (window.particleFundProver) {
+                    output.textContent += '\nCalling initialize...\n';
+                    window.particleFundProver.initialize();
+                }
+            }, 1000);
+        }
+    </script>
+</body>
+</html>

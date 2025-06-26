@@ -31,6 +31,20 @@ export interface ZKProof {
   'c' : [string, string],
   'publicSignals' : Array<string>,
 }
+export interface PlonkProof {
+  'lro' : Array<[string, string]>,
+  'z' : [string, string],
+  'h' : Array<[string, string]>,
+  'batched_proof' : {
+    'h' : [string, string],
+    'claimed_values' : Array<string>,
+  },
+  'zshifted_proof' : {
+    'h' : [string, string],
+    'claimed_value' : string,
+  },
+  'bsb22_commitments' : Array<[string, string]>,
+}
 export interface _SERVICE {
   'batchProcessWithdrawals' : ActorMethod<[Array<bigint>], Result_2>,
   'getPendingWithdrawals' : ActorMethod<[], Array<Withdrawal>>,
@@ -42,7 +56,7 @@ export interface _SERVICE {
   >,
   'getWithdrawalsByChain' : ActorMethod<[ChainId], Array<Withdrawal>>,
   'initiateWithdrawal' : ActorMethod<
-    [NullifierHash, string, Amount, TokenId, ChainId, MerkleRoot, ZKProof],
+    [NullifierHash, string, Amount, TokenId, ChainId, MerkleRoot, PlonkProof],
     Result_1
   >,
   'isNullifierUsed' : ActorMethod<[NullifierHash], boolean>,

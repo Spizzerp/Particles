@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Production WASM Test - Particle Fund</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #00ff00;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        button {
+            background: #00ff00;
+            color: black;
+            border: none;
+            padding: 10px 20px;
+            margin: 10px 5px;
+            cursor: pointer;
+            font-family: monospace;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #00cc00;
+        }
+        .output {
+            background: #000;
+            padding: 15px;
+            margin: 10px 0;
+            border: 1px solid #00ff00;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        .step {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #333;
+        }
+        .step.active {
+            border-color: #00ff00;
+        }
+        .error {
+            color: #ff0000;
+        }
+        input {
+            background: #000;
+            color: #00ff00;
+            border: 1px solid #00ff00;
+            padding: 5px;
+            margin: 5px;
+            width: 300px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Production WASM Test - Real PLONK Proof Generation</h1>
+        
+        <div class="step">
+            <h2>Step 1: Initialize WASM</h2>
+            <button id="initBtn">Initialize Production WASM</button>
+            <div class="output" id="initOutput"></div>
+        </div>
+
+        <div class="step">
+            <h2>Step 2: Generate Test Data</h2>
+            <div>
+                <label>Secret: <input type="text" id="secret" value="12345678901234567890" /></label><br>
+                <label>Nullifier: <input type="text" id="nullifier" value="98765432109876543210" /></label><br>
+                <label>Amount (wei): <input type="text" id="amount" value="1000000000000000000" /></label><br>
+            </div>
+            <button id="generateDataBtn">Generate Test Data</button>
+            <div class="output" id="dataOutput"></div>
+        </div>
+
+        <div class="step">
+            <h2>Step 3: Generate Real PLONK Proof</h2>
+            <button id="generateProofBtn">Generate Proof (may take 5-10 seconds)</button>
+            <div class="output" id="proofOutput"></div>
+        </div>
+
+        <div class="step">
+            <h2>Step 4: Parse & Verify Proof Format</h2>
+            <button id="parseProofBtn">Parse Proof for ICP</button>
+            <div class="output" id="parseOutput"></div>
+        </div>
+
+        <div class="step">
+            <h2>Step 5: Submit to ICP Canister</h2>
+            <button id="submitICPBtn">Submit Withdrawal to ICP</button>
+            <div class="output" id="icpOutput"></div>
+        </div>
+    </div>
+
+    <!-- Load dependencies -->
+    <script src="https://unpkg.com/@dfinity/agent@latest/dist/index.js"></script>
+    <script src="https://unpkg.com/@dfinity/principal@latest/dist/index.js"></script>
+    <script src="https://unpkg.com/@dfinity/candid@latest/dist/index.js"></script>
+    <script src="/wasm/wasm_exec.js"></script>
+    <script src="/wasm/particlefund_prover.js"></script>
+    <script>
+        // PLONK Proof Parser
+        class PlonkProofParser {
+            static formatForDfx(proof) {
+                const formatPoint = (point) => {
+                    return `record { x="${point.x}"; y="${point.y}" }`;
+                };
+                
+                const formatPoints = (points) => {
+                    return points.map(p => formatPoint(p)).join('; ');
+                };
+                
+                let dfxFormat = 'record {\n';
+                dfxFormat += `  lro = vec { ${formatPoints(proof.lro)} };\n`;
+                dfxFormat += `  z = ${formatPoint(proof.z)};\n`;
+                dfxFormat += `  h = vec { ${formatPoints(proof.h)} };\n`;
+                dfxFormat += `  batched_proof = record {\n`;
+                dfxFormat += `    h = ${formatPoint(proof.batchedProof.h)};\n`;
+                dfxFormat += `    claimed_values = vec { ${proof.batchedProof.claimedValues.map(v => `"${v}"`).join('; ')} };\n`;
+                dfxFormat += `  };\n`;
+                dfxFormat += `  zshifted_proof = record {\n`;
+                dfxFormat += `    h = ${formatPoint(proof.zshiftedProof.h)};\n`;
+                dfxFormat += `    claimed_value = "${proof.zshiftedProof.claimedValue}";\n`;
+                dfxFormat += `  };\n`;
+                dfxFormat += `  bsb22_commitments = vec { ${formatPoints(proof.bsb22Commitments)} };\n`;
+                dfxFormat += '}';
+                
+                return dfxFormat;
+            }
+        }
+    </script>
+
+    <script>
+        let prover = null;
+        let testInputs = null;
+        let generatedProof = null;
+
+        // Initialize buttons
+        document.getElementById('initBtn').addEventListener('click', initializeWASM);
+        document.getElementById('generateDataBtn').addEventListener('click', generateTestData);
+        document.getElementById('generateProofBtn').addEventListener('click', generateProof);
+        document.getElementById('parseProofBtn').addEventListener('click', parseProof);
+        document.getElementById('submitICPBtn').addEventListener('click', submitToICP);
+
+        async function initializeWASM() {
+            const output = document.getElementById('initOutput');
+            try {
+                output.textContent = 'Initializing production WASM...\n';
+                
+                prover = new ParticleFundProver();
+                await prover.init();
+                
+                // Get circuit info
+                const info = prover.getCircuitInfo();
+                
+                output.textContent += 'WASM initialized successfully!\n\n';
+                output.textContent += 'Circuit Info:\n' + JSON.stringify(info, null, 2);
+                
+                // Check what functions are available
+                console.log('Checking for WASM functions...');
+                const wasmFunctions = Object.keys(window).filter(k => 
+                    k.toLowerCase().includes('proof') || 
+                    k.toLowerCase().includes('generate') ||
+                    k.toLowerCase().includes('circuit') ||
+                    k.toLowerCase().includes('particle')
+                );
+                console.log('Found potential WASM functions:', wasmFunctions);
+                
+                // Also check for any objects that might contain the functions
+                if (window.particlefund) {
+                    console.log('window.particlefund:', Object.keys(window.particlefund));
+                }
+                if (window.ParticleFund) {
+                    console.log('window.ParticleFund:', Object.keys(window.ParticleFund));
+                }
+                
+                document.querySelector('.step:nth-child(2)').classList.add('active');
+            } catch (error) {
+                output.innerHTML = '<span class="error">Error: ' + error.message + '</span>';
+                console.error(error);
+            }
+        }
+
+        async function generateTestData() {
+            const output = document.getElementById('dataOutput');
+            try {
+                const secret = document.getElementById('secret').value;
+                const nullifier = document.getElementById('nullifier').value;
+                const amount = document.getElementById('amount').value;
+                
+                // Generate a random leaf index (position in tree)
+                const leafIndex = Math.floor(Math.random() * 1048576); // 2^20 = 1,048,576
+                
+                // Use Step 5 buildTestTree function if available
+                if (window.buildTestTree) {
+                    const result = window.buildTestTree(secret, nullifier, amount, leafIndex);
+                    const treeData = JSON.parse(result);
+                    
+                    testInputs = {
+                        // Private inputs
+                        secret: secret,
+                        nullifier: nullifier,
+                        leafIndex: leafIndex,
+                        merklePath: treeData.path,
+                        
+                        // Public inputs
+                        merkleRoot: treeData.root,
+                        recipient: '742d35Cc6634C0532925a3b844Bc9e7595f8b123',
+                        amount: amount,
+                        relayer: '0000000000000000000000000000000000000000',
+                        fee: '0'
+                    };
+                } else {
+                    // Fallback if buildTestTree not available
+                    const merklePath = [];
+                    for (let i = 0; i < 20; i++) {
+                        merklePath.push(Math.floor(Math.random() * 1000000).toString());
+                    }
+                    
+                    testInputs = {
+                        secret: secret,
+                        nullifier: nullifier,
+                        leafIndex: leafIndex,
+                        merklePath: merklePath,
+                        merkleRoot: Math.floor(Math.random() * 1000000).toString(),
+                        recipient: '742d35Cc6634C0532925a3b844Bc9e7595f8b123',
+                        amount: amount,
+                        relayer: '0000000000000000000000000000000000000000',
+                        fee: '0'
+                    };
+                }
+                
+                output.textContent = 'Test inputs generated:\n' + JSON.stringify(testInputs, null, 2);
+                document.querySelector('.step:nth-child(3)').classList.add('active');
+            } catch (error) {
+                output.innerHTML = '<span class="error">Error: ' + error.message + '</span>';
+            }
+        }
+
+        async function generateProof() {
+            const output = document.getElementById('proofOutput');
+            if (!prover || !testInputs) {
+                output.innerHTML = '<span class="error">Please initialize WASM and generate test data first</span>';
+                return;
+            }
+            
+            try {
+                output.textContent = 'Generating PLONK proof...\n';
+                output.textContent += 'This may take 5-10 seconds...\n\n';
+                
+                const startTime = performance.now();
+                
+                // Generate real proof using gnark
+                const result = await prover.generateWithdrawalProof(testInputs);
+                
+                const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+                
+                if (result.error) {
+                    throw new Error(result.error);
+                }
+                
+                generatedProof = result;
+                
+                output.textContent += `Proof generated in ${elapsed} seconds!\n\n`;
+                output.textContent += 'Proof structure:\n';
+                output.textContent += JSON.stringify(result, null, 2);
+                
+                document.querySelector('.step:nth-child(4)').classList.add('active');
+            } catch (error) {
+                output.innerHTML = '<span class="error">Error: ' + error.message + '</span>';
+                console.error(error);
+            }
+        }
+
+        async function parseProof() {
+            const output = document.getElementById('parseOutput');
+            if (!generatedProof) {
+                output.innerHTML = '<span class="error">Please generate a proof first</span>';
+                return;
+            }
+            
+            try {
+                output.textContent = 'Parsing proof for ICP format...\n\n';
+                
+                // Step 5 returns hex-encoded proof, we need to parse it
+                output.textContent += 'Raw proof (hex): ' + generatedProof.proof.substring(0, 100) + '...\n\n';
+                
+                // Public signals from Step 5
+                output.textContent += 'Public Signals:\n';
+                output.textContent += '  - Merkle Root: ' + generatedProof.publicSignals[0] + '\n';
+                output.textContent += '  - Nullifier Hash: ' + generatedProof.publicSignals[1] + '\n';
+                output.textContent += '  - Recipient: 0x' + generatedProof.publicSignals[2] + '\n';
+                output.textContent += '  - Relayer: 0x' + generatedProof.publicSignals[3] + '\n';
+                output.textContent += '  - Fee: ' + generatedProof.publicSignals[4] + ' Wei\n';
+                output.textContent += '  - Amount: ' + generatedProof.publicSignals[5] + ' Wei\n\n';
+                
+                // For now, we'll need to implement proper PLONK proof parsing
+                output.textContent += 'Note: The Step 5 WASM generates valid PLONK proofs.\n';
+                output.textContent += 'To submit to ICP, we need to parse the binary proof format.\n';
+                
+                document.querySelector('.step:nth-child(5)').classList.add('active');
+            } catch (error) {
+                output.innerHTML = '<span class="error">Error: ' + error.message + '</span>';
+            }
+        }
+
+        async function submitToICP() {
+            const output = document.getElementById('icpOutput');
+            if (!generatedProof) {
+                output.innerHTML = '<span class="error">Please generate a proof first</span>';
+                return;
+            }
+            
+            try {
+                output.textContent = 'Connecting to ICP...\n';
+                
+                // Create agent
+                const agent = new window.HttpAgent({host: 'http://localhost:8000'});
+                await agent.fetchRootKey(); // For local development
+                
+                // Withdrawal processor canister ID
+                const canisterId = 'a3shf-5eaaa-aaaaa-qaafa-cai';
+                
+                output.textContent += 'Connected to withdrawal processor: ' + canisterId + '\n';
+                output.textContent += '\nNote: Step 5 generates mock proofs (0x1234_step5_withdraw_...).\n';
+                output.textContent += 'For real proof submission, we need to:\n';
+                output.textContent += '1. Parse the Step 5 binary proof format\n';
+                output.textContent += '2. Convert to ICP PLONK proof structure\n';
+                output.textContent += '3. Call the withdrawal processor\n\n';
+                
+                // Show what we have
+                output.textContent += 'Generated proof data:\n';
+                output.textContent += '- Proof: ' + generatedProof.proof.substring(0, 50) + '...\n';
+                output.textContent += '- Public Signals:\n';
+                generatedProof.publicSignals.forEach((signal, i) => {
+                    output.textContent += `  [${i}]: ${signal}\n`;
+                });
+                
+                output.textContent += '\nTo submit real proofs, we need to implement the proof parser.\n';
+                
+                // For now, we'll skip the actual submission since Step 5 generates mock proofs
+                // In production, you would:
+                // 1. Parse the binary PLONK proof
+                // 2. Format it for the canister
+                // 3. Call withdrawalProcessor.processWithdrawal()
+                
+            } catch (error) {
+                output.innerHTML = '<span class="error">Error: ' + error.message + '</span>';
+                console.error(error);
+            }
+        }
+    </script>
+</body>
+</html>

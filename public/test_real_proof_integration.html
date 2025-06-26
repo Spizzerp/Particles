@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Real Proof Integration Test</title>
+  <style>
+    body {
+      font-family: monospace;
+      background-color: black;
+      color: lime;
+      padding: 1rem;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    h2 { color: #0f0; margin-top: 30px; }
+    .section {
+      background: #111;
+      border: 1px solid #0f0;
+      padding: 15px;
+      margin: 15px 0;
+      border-radius: 5px;
+    }
+    button {
+      background: #000;
+      border: 2px solid #0f0;
+      color: #0f0;
+      padding: 10px 20px;
+      cursor: pointer;
+      margin: 10px 5px;
+    }
+    button:hover {
+      background: #0f0;
+      color: #000;
+    }
+    pre {
+      background: #000;
+      padding: 10px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      font-size: 12px;
+    }
+    .success { color: #0f0; }
+    .error { color: #f00; }
+    .info { color: #ff0; }
+    .warning { color: #fa0; }
+    .command {
+      background: #222;
+      padding: 15px;
+      margin: 10px 0;
+      border-radius: 5px;
+      font-size: 11px;
+      overflow-x: auto;
+    }
+    input {
+      background: #000;
+      color: #0f0;
+      border: 1px solid #0f0;
+      padding: 8px;
+      margin: 5px;
+      width: 300px;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <h1>Real Proof Integration Test</h1>
+  
+  <div class="section">
+    <h2>1. Generate Proof with WASM</h2>
+    <button onclick="generateRealProof()">Generate Real Proof</button>
+    <pre id="proofOutput">Ready to generate proof...</pre>
+  </div>
+  
+  <div class="section">
+    <h2>2. Parse & Submit to ICP</h2>
+    <button onclick="parseAndSubmit()" id="submitBtn" disabled>Parse & Submit Proof</button>
+    <pre id="parseOutput">Generate proof first...</pre>
+    <div id="commandSection"></div>
+  </div>
+
+  <script src="/wasm/wasm_exec.js"></script>
+  <script src="/src/utils/PlonkProofParser.js"></script>
+  <script>
+    let wasmReady = false;
+    let currentProofData = null;
+    
+    // Initialize WASM
+    (async () => {
+      try {
+        const go = new Go();
+        
+        // Add gojs namespace
+        const importObject = go.importObject;
+        if (!importObject.gojs && importObject.go) {
+          importObject.gojs = importObject.go;
+        }
+        
+        // Load Step 5 WASM
+        const result = await WebAssembly.instantiateStreaming(
+          fetch('/wasm/particlefund_step5_standard.wasm'),
+          importObject
+        );
+        
+        go.run(result.instance);
+        
+        // Wait for initialization
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        wasmReady = true;
+        console.log('WASM ready');
+      } catch (error) {
+        console.error('Failed to initialize WASM:', error);
+        document.getElementById('proofOutput').innerHTML = 
+          '<span class="error">Error: Failed to initialize WASM - ' + error.message + '</span>';
+      }
+    })();
+    
+    function padHexTo64(value) {
+      let hex = value.toString().replace(/^0x/i, '');
+      if (hex.length === 1) hex = '0' + hex;
+      return '0x' + hex.padStart(64, '0');
+    }
+    
+    async function generateRealProof() {
+      if (!wasmReady) {
+        document.getElementById('proofOutput').innerHTML = 
+          '<span class="error">Error: WASM not ready</span>';
+        return;
+      }
+      
+      document.getElementById('proofOutput').innerHTML = 
+        '<span class="info">Generating proof...</span>';
+      
+      const witness = {
+        secret: "123456789",
+        nullifier: "987654321",
+        amount: "1000000000000000000", // 1 ETH
+        leafIndex: 0,
+        merklePath: new Array(20).fill("1"),
+        merkleRoot: "12345",
+        recipient: "0x1234567890123456789012345678901234567890",
+        relayer: "0x0000000000000000000000000000000000000000",
+        fee: "0"
+      };
+      
+      try {
+        const startTime = performance.now();
+        const result = window.generateProof(JSON.stringify(witness));
+        const elapsed = performance.now() - startTime;
+        
+        const parsed = JSON.parse(result);
+        currentProofData = {
+          witness: witness,
+          result: parsed,
+          elapsed: elapsed
+        };
+        
+        document.getElementById('proofOutput').innerHTML = 
+          '<span class="success">Proof generated!</span>\n\n' +
+          '<b>Time:</b> ' + elapsed.toFixed(0) + ' ms\n' +
+          '<b>Proof (mock):</b> ' + parsed.proof + '\n\n' +
+          '<b>Public Signals:</b>\n' + 
+          JSON.stringify(parsed.publicSignals, null, 2) + '\n\n' +
+          '<span class="warning">Note: Currently using mock proof data</span>\n' +
+          '<span class="info">Real gnark integration would return binary proof data</span>';
+        
+        document.getElementById('submitBtn').disabled = false;
+        document.getElementById('parseOutput').innerHTML = 
+          '<span class="info">Ready to parse and submit...</span>';
+        
+      } catch (error) {
+        document.getElementById('proofOutput').innerHTML = 
+          '<span class="error">Error: ' + error.message + '</span>';
+        console.error(error);
+      }
+    }
+    
+    async function parseAndSubmit() {
+      if (!currentProofData) {
+        document.getElementById('parseOutput').innerHTML = 
+          '<span class="error">No proof data available</span>';
+        return;
+      }
+      
+      document.getElementById('parseOutput').innerHTML = 
+        '<span class="info">Parsing proof data...</span>';
+      
+      try {
+        // Simulate what would happen with real gnark binary proof
+        // In reality, we'd get base64 encoded binary data from WASM
+        
+        // For demonstration, create mock binary data
+        const mockBinaryProof = new ArrayBuffer(800); // PLONK proofs are ~800 bytes
+        const mockBinaryWitness = new ArrayBuffer(196); // 4 bytes + 6 * 32 bytes
+        
+        // Fill with mock data
+        const proofView = new DataView(mockBinaryProof);
+        const witnessView = new DataView(mockBinaryWitness);
+        
+        // Mock witness: 6 public inputs
+        witnessView.setUint32(0, 6, false); // number of public inputs
+        
+        // Simulate base64 encoding (what real gnark would return)
+        const base64Proof = btoa(String.fromCharCode(...new Uint8Array(mockBinaryProof)));
+        const base64Witness = btoa(String.fromCharCode(...new Uint8Array(mockBinaryWitness)));
+        
+        document.getElementById('parseOutput').innerHTML = 
+          '<span class="info">Simulating gnark binary output...</span>\n\n' +
+          '<b>Binary Proof Size:</b> ' + mockBinaryProof.byteLength + ' bytes\n' +
+          '<b>Binary Witness Size:</b> ' + mockBinaryWitness.byteLength + ' bytes\n' +
+          '<b>Base64 Proof Length:</b> ' + base64Proof.length + '\n' +
+          '<b>Base64 Witness Length:</b> ' + base64Witness.length + '\n\n';
+        
+        // In real implementation, we'd parse the binary data
+        // For now, use our mock structured data
+        const icpProof = {
+          lro: [
+            [padHexTo64('01'), padHexTo64('02')],
+            [padHexTo64('03'), padHexTo64('04')],
+            [padHexTo64('05'), padHexTo64('06')]
+          ],
+          z: [padHexTo64('07'), padHexTo64('08')],
+          h: [
+            [padHexTo64('09'), padHexTo64('0a')],
+            [padHexTo64('0b'), padHexTo64('0c')],
+            [padHexTo64('0d'), padHexTo64('0e')]
+          ],
+          batched_proof: {
+            h: [padHexTo64('0f'), padHexTo64('10')],
+            claimed_values: [padHexTo64('11'), padHexTo64('12')]
+          },
+          zshifted_proof: {
+            h: [padHexTo64('13'), padHexTo64('14')],
+            claimed_value: padHexTo64('15')
+          },
+          bsb22_commitments: []
+        };
+        
+        // Extract values from public signals
+        const ps = currentProofData.result.publicSignals;
+        const nullifierHash = ps[1];
+        const recipient = currentProofData.witness.recipient;
+        const amount = ps[5];
+        const merkleRoot = padHexTo64(ps[0]);
+        
+        // Build the dfx command
+        const dfxCommand = `dfx canister call withdrawal_processor initiateWithdrawal '(
+  "${nullifierHash}",
+  "${recipient}",
+  ${amount},
+  "ETH",
+  1,
+  "${merkleRoot}",
+  ${PlonkProofParser.formatForDfx(icpProof)}
+)'`;
+        
+        document.getElementById('parseOutput').innerHTML += 
+          '\n<span class="success">Proof parsed successfully!</span>\n\n' +
+          '<b>ICP Proof Structure:</b>\n' +
+          JSON.stringify(icpProof, null, 2).substring(0, 500) + '...\n\n' +
+          '<b>Public Inputs:</b>\n' +
+          '1. Merkle Root: ' + merkleRoot + '\n' +
+          '2. Nullifier Hash: ' + nullifierHash + '\n' +
+          '3. Recipient: ' + recipient + '\n' +
+          '4. Amount: ' + amount + ' wei\n';
+        
+        document.getElementById('commandSection').innerHTML = 
+          '<h3>DFX Command:</h3>' +
+          '<div class="command">' + dfxCommand.replace(/\n/g, '<br>') + '</div>' +
+          '<p class="warning">This uses mock proof data. Real implementation would:</p>' +
+          '<ol>' +
+          '<li>Receive binary proof from gnark WASM</li>' +
+          '<li>Parse binary format using PlonkProofParser</li>' +
+          '<li>Extract G1/G2 points and scalar values</li>' +
+          '<li>Format for ICP canister submission</li>' +
+          '</ol>';
+        
+      } catch (error) {
+        document.getElementById('parseOutput').innerHTML = 
+          '<span class="error">Error parsing proof: ' + error.message + '</span>';
+        console.error(error);
+      }
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple ICP Test</title>
+</head>
+<body>
+    <h1>Simple ICP Connection Test</h1>
+    <button onclick="testConnection()">Test ICP Connection</button>
+    <div id="output"></div>
+
+    <script>
+        async function testConnection() {
+            const output = document.getElementById('output');
+            output.innerHTML = 'Testing connection...<br>';
+            
+            try {
+                // Direct approach without modules
+                const response = await fetch('http://localhost:8000/api/v2/status');
+                const data = await response.json();
+                output.innerHTML += `✅ ICP Replica Status: ${JSON.stringify(data, null, 2)}<br>`;
+                
+                // Now test canister call
+                output.innerHTML += '<br>Testing canister call...<br>';
+                
+                // Use raw HTTP call to test
+                const canisterResponse = await fetch('http://localhost:8000/api/v2/canister/a3shf-5eaaa-aaaaa-qaafa-cai/query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/cbor'
+                    },
+                    body: new Uint8Array([0]) // Minimal CBOR
+                });
+                
+                output.innerHTML += `Canister response status: ${canisterResponse.status}<br>`;
+                
+            } catch (error) {
+                output.innerHTML += `❌ Error: ${error.message}<br>`;
+            }
+        }
+    </script>
+</body>
+</html>

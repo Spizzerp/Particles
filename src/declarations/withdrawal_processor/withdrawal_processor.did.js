@@ -13,6 +13,20 @@ export const idlFactory = ({ IDL }) => {
     'c' : IDL.Tuple(IDL.Text, IDL.Text),
     'publicSignals' : IDL.Vec(IDL.Text),
   });
+  const PlonkProof = IDL.Record({
+    'lro': IDL.Vec(IDL.Tuple(IDL.Text, IDL.Text)),
+    'z': IDL.Tuple(IDL.Text, IDL.Text),
+    'h': IDL.Vec(IDL.Tuple(IDL.Text, IDL.Text)),
+    'batched_proof': IDL.Record({
+      'h': IDL.Tuple(IDL.Text, IDL.Text),
+      'claimed_values': IDL.Vec(IDL.Text),
+    }),
+    'zshifted_proof': IDL.Record({
+      'h': IDL.Tuple(IDL.Text, IDL.Text),
+      'claimed_value': IDL.Text,
+    }),
+    'bsb22_commitments': IDL.Vec(IDL.Tuple(IDL.Text, IDL.Text)),
+  });
   const ChainId = IDL.Nat;
   const Amount = IDL.Nat;
   const Withdrawal = IDL.Record({
@@ -57,7 +71,7 @@ export const idlFactory = ({ IDL }) => {
           TokenId,
           ChainId,
           MerkleRoot,
-          ZKProof,
+          PlonkProof,
         ],
         [Result_1],
         [],

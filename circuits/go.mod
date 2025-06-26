@@ -1,11 +1,16 @@
 module particlefund/circuits
 
-go 1.24.4
+go 1.23.0
+
+toolchain go1.24.4
 
 require (
 	github.com/consensys/gnark v0.13.0
 	github.com/consensys/gnark-crypto v0.18.0
+	gnark-prover-tinygo v0.0.0
 )
+
+replace gnark-prover-tinygo => ../gnark-prover-tinygo
 
 require (
 	github.com/bits-and-blooms/bitset v1.22.0 // indirect

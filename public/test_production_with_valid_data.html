@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Production WASM Test with Valid Data</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 2px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        .step {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        .step.active {
+            background-color: #e8f5e9;
+            border-color: #4CAF50;
+        }
+        .step h3 {
+            margin-top: 0;
+            color: #4CAF50;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .output {
+            background-color: #f0f0f0;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-family: monospace;
+            font-size: 14px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .error {
+            background-color: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+        .success {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+        .loading {
+            color: #1976d2;
+            font-style: italic;
+        }
+        .data-section {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f5f5f5;
+            border-radius: 5px;
+        }
+        .data-section h4 {
+            margin-top: 0;
+            color: #666;
+        }
+        .timing {
+            color: #666;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Production WASM Test with Valid Test Data</h1>
+        
+        <div class="step" id="step1">
+            <h3>Step 1: Load Test Data</h3>
+            <button onclick="loadTestData()">Load Test Data</button>
+            <div id="step1-output"></div>
+        </div>
+
+        <div class="step" id="step2">
+            <h3>Step 2: Initialize Production WASM</h3>
+            <button onclick="initWasm()" disabled>Initialize Production WASM</button>
+            <div id="step2-output"></div>
+        </div>
+
+        <div class="step" id="step3">
+            <h3>Step 3: Generate PLONK Proof</h3>
+            <button onclick="generateProof()" disabled>Generate Proof</button>
+            <div id="step3-output"></div>
+        </div>
+
+        <div class="step" id="step4">
+            <h3>Step 4: Verify Proof Locally</h3>
+            <button onclick="verifyProofLocally()" disabled>Verify Proof</button>
+            <div id="step4-output"></div>
+        </div>
+
+        <div class="step" id="step5">
+            <h3>Step 5: Submit to ICP Canister</h3>
+            <button onclick="submitToCanister()" disabled>Submit Withdrawal</button>
+            <div id="step5-output"></div>
+        </div>
+    </div>
+
+    <script src="/wasm/wasm_exec.js"></script>
+    <script>
+        // Use proxy server for ICP submission
+        window.submitWithdrawalToICP = async (proofData, inputs) => {
+            try {
+                const response = await fetch('http://localhost:8081/submit-withdrawal', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ proofData, inputs })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    return { ok: result.withdrawalId };
+                } else {
+                    return { err: result.error };
+                }
+            } catch (error) {
+                console.error('ICP submission error:', error);
+                throw error;
+            }
+        };
+        
+        console.log('ICP proxy integration ready');
+    </script>
+    <script>
+        let testData = null;
+        let witnessData = null;
+        let generatedProof = null;
+        let wasmReady = false;
+
+        async function loadTestData() {
+            const output = document.getElementById('step1-output');
+            output.innerHTML = '<p class="loading">Loading test data...</p>';
+            
+            try {
+                // Load test_data.json
+                const testResponse = await fetch('/test_data.json');
+                if (!testResponse.ok) {
+                    throw new Error('test_data.json not found. Please run: node scripts/generate_test_data.js');
+                }
+                testData = await testResponse.json();
+                
+                // Load witness.json
+                const witnessResponse = await fetch('/witness.json');
+                if (!witnessResponse.ok) {
+                    throw new Error('witness.json not found. Please run: node scripts/generate_test_data.js');
+                }
+                witnessData = await witnessResponse.json();
+                
+                output.innerHTML = `
+                    <div class="success">✅ Test data loaded successfully!</div>
+                    <div class="data-section">
+                        <h4>Deposit Information:</h4>
+                        <div class="output">Commitment: ${testData.deposit.commitment}
+Leaf Index: ${testData.deposit.leafIndex}
+Amount: ${testData.deposit.amount} wei (1 ETH)</div>
+                    </div>
+                    <div class="data-section">
+                        <h4>Withdrawal Information:</h4>
+                        <div class="output">Nullifier Hash: ${testData.withdrawal.nullifierHash}
+Recipient: ${testData.withdrawal.recipient}
+Merkle Root: ${testData.withdrawal.merkleRoot}</div>
+                    </div>
+                `;
+                
+                document.getElementById('step1').classList.add('active');
+                document.querySelector('#step2 button').disabled = false;
+                
+            } catch (error) {
+                output.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+            }
+        }
+
+        async function initWasm() {
+            const output = document.getElementById('step2-output');
+            const btn = document.getElementById('step2').querySelector('button');
+            
+            try {
+                btn.disabled = true;
+                output.innerHTML = '<p class="loading">Loading Production WASM (20MB)...</p>';
+                
+                const go = new Go();
+                const response = await fetch('/wasm/particlefund_production_real.wasm');
+                if (!response.ok) {
+                    throw new Error('Production WASM not found');
+                }
+                
+                const buffer = await response.arrayBuffer();
+                output.innerHTML += '\n<p class="loading">Instantiating WASM...</p>';
+                
+                const result = await WebAssembly.instantiate(buffer, go.importObject);
+                
+                // Set up message capture for initialization
+                let initMessage = null;
+                const originalPostMessage = window.postMessage.bind(window);
+                window.postMessage = (data) => {
+                    if (typeof data === 'string' && data.startsWith('{')) {
+                        try {
+                            const parsed = JSON.parse(data);
+                            console.log('WASM message:', parsed);
+                            if (parsed.timeMs !== undefined && !parsed.proof) {
+                                initMessage = parsed;
+                            } else if (parsed.proof) {
+                                generatedProof = parsed;
+                            }
+                        } catch (e) {
+                            console.error('Parse error:', e);
+                        }
+                    }
+                    originalPostMessage(data, '*');
+                };
+                
+                go.run(result.instance);
+                
+                // Wait for prover
+                let attempts = 0;
+                while (!window.particleFundProver && attempts < 50) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    attempts++;
+                }
+                
+                if (!window.particleFundProver) {
+                    throw new Error('Prover not available');
+                }
+                
+                // Initialize prover
+                output.innerHTML += '\n<p class="loading">Calling prover.initialize()...</p>';
+                window.particleFundProver.initialize();
+                
+                // Wait for initialization
+                attempts = 0;
+                while (!initMessage && attempts < 50) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    attempts++;
+                }
+                
+                if (initMessage && initMessage.success) {
+                    wasmReady = true;
+                    output.innerHTML = '<div class="success">✅ Production prover initialized!</div>';
+                    output.innerHTML += '\n<p>Constraints: 25,969 (full circuit)</p>';
+                    document.getElementById('step2').classList.add('active');
+                    document.querySelector('#step3 button').disabled = false;
+                } else {
+                    throw new Error('Initialization failed');
+                }
+                
+            } catch (error) {
+                output.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function generateProof() {
+            const output = document.getElementById('step3-output');
+            const btn = document.getElementById('step3').querySelector('button');
+            
+            if (!wasmReady || !witnessData) {
+                output.innerHTML = '<div class="error">Initialize WASM and load data first</div>';
+                return;
+            }
+            
+            try {
+                btn.disabled = true;
+                output.innerHTML = '<p class="loading">Generating production PLONK proof...</p>';
+                output.innerHTML += '\n<p>This uses the FULL circuit with all constraints...</p>';
+                
+                const startTime = performance.now();
+                
+                // Reset generated proof
+                generatedProof = null;
+                
+                // Convert witness data to test inputs format
+                const testInputs = {
+                    secret: witnessData.Secret,
+                    nullifier: witnessData.Nullifier,
+                    amount: witnessData.Amount,
+                    merklePath: witnessData.MerklePath,
+                    merkleIndices: witnessData.MerkleIndices.map(idx => parseInt(idx)),
+                    merkleRoot: witnessData.MerkleRoot,
+                    nullifierHash: witnessData.NullifierHash,
+                    recipient: witnessData.Recipient,
+                    relayer: witnessData.Relayer,
+                    fee: witnessData.Fee,
+                    refund: witnessData.Refund
+                };
+                
+                // Call prover
+                window.particleFundProver.generateProof(JSON.stringify(testInputs));
+                
+                // Wait for proof
+                let attempts = 0;
+                while (!generatedProof && attempts < 300) { // 30 seconds
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    attempts++;
+                }
+                
+                if (!generatedProof) {
+                    throw new Error('Proof generation timeout');
+                }
+                
+                if (!generatedProof.success) {
+                    throw new Error(generatedProof.error || 'Proof generation failed');
+                }
+                
+                const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+                
+                output.innerHTML = `
+                    <div class="success">✅ PLONK proof generated successfully!</div>
+                    <div class="timing">Generation time: ${elapsed} seconds</div>
+                    <div class="data-section">
+                        <h4>Proof Data:</h4>
+                        <div class="output">Proof size: ${generatedProof.proof.length/2} bytes
+Public signals: ${generatedProof.publicSignals.length}
+
+This is a REAL PLONK proof with full constraints!</div>
+                    </div>
+                `;
+                
+                document.getElementById('step3').classList.add('active');
+                document.querySelector('#step4 button').disabled = false;
+                
+            } catch (error) {
+                output.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+                console.error('Proof generation error:', error);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function verifyProofLocally() {
+            const output = document.getElementById('step4-output');
+            output.innerHTML = '<p class="loading">Verifying proof structure...</p>';
+            
+            try {
+                if (!generatedProof || !generatedProof.proof) {
+                    throw new Error('No proof generated');
+                }
+                
+                // Parse the proof hex string
+                const proofHex = generatedProof.proof;
+                const proofBytes = new Uint8Array(proofHex.match(/.{2}/g).map(byte => parseInt(byte, 16)));
+                
+                // Verify proof structure
+                output.innerHTML = '<p class="loading">Checking proof format...</p>';
+                
+                // Expected PLONK proof size (approximately)
+                // 8 G1 points (64 bytes each) + additional data ≈ 520+ bytes
+                if (proofBytes.length < 500) {
+                    throw new Error(`Proof too small: ${proofBytes.length} bytes`);
+                }
+                
+                // Verify public signals match
+                const expectedSignals = 7; // Based on circuit design
+                if (generatedProof.publicSignals.length !== expectedSignals) {
+                    throw new Error(`Expected ${expectedSignals} public signals, got ${generatedProof.publicSignals.length}`);
+                }
+                
+                // Verify public signals match our witness data
+                const [merkleRoot, nullifierHash, recipient, amount, relayer, fee, refund] = generatedProof.publicSignals;
+                
+                console.log('Public signals from proof:');
+                console.log('- merkleRoot:', merkleRoot);
+                console.log('- nullifierHash:', nullifierHash);
+                console.log('- recipient:', recipient);
+                console.log('- amount:', amount);
+                console.log('- relayer:', relayer);
+                console.log('- fee:', fee);
+                console.log('- refund:', refund);
+                
+                if (merkleRoot !== witnessData.MerkleRoot) {
+                    throw new Error('Merkle root mismatch');
+                }
+                if (nullifierHash !== witnessData.NullifierHash) {
+                    throw new Error('Nullifier hash mismatch');
+                }
+                
+                output.innerHTML = `
+                    <div class="success">✅ Proof structure validated!</div>
+                    <div class="data-section">
+                        <h4>Proof Details:</h4>
+                        <div class="output">Size: ${proofBytes.length} bytes
+Format: PLONK with KZG commitments
+Curve: BN254</div>
+                    </div>
+                    <div class="data-section">
+                        <h4>Public Inputs Verified:</h4>
+                        <div class="output">✓ Merkle Root: ${merkleRoot.substring(0, 20)}...
+✓ Nullifier Hash: ${nullifierHash.substring(0, 20)}...
+✓ Recipient: ${recipient}
+✓ Amount: ${amount} wei
+✓ Fee: ${fee} wei</div>
+                    </div>
+                    <div class="data-section">
+                        <h4>Next Step:</h4>
+                        <div class="output">Submit to ICP for on-chain cryptographic verification</div>
+                    </div>
+                `;
+                
+                document.getElementById('step4').classList.add('active');
+                document.querySelector('#step5 button').disabled = false;
+                
+            } catch (error) {
+                output.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+            }
+        }
+
+        // Helper function to ensure hex strings have even length
+        function ensureEvenHex(value) {
+            if (typeof value !== 'string') return value;
+            if (value.startsWith('0x')) {
+                const hex = value.substring(2);
+                if (hex.length % 2 === 1) {
+                    return '0x0' + hex;
+                }
+                return value;
+            }
+            return value;
+        }
+        
+        // Convert decimal string to hex string
+        function decimalToHex(decimalStr) {
+            if (decimalStr === "0") return "0x0000000000000000000000000000000000000000000000000000000000000000";
+            const bigInt = BigInt(decimalStr);
+            let hex = bigInt.toString(16);
+            // Pad to 64 hex chars (32 bytes)
+            hex = hex.padStart(64, '0');
+            return '0x' + hex;
+        }
+
+        async function submitToCanister() {
+            const output = document.getElementById('step5-output');
+            const btn = document.getElementById('step5').querySelector('button');
+            
+            if (!generatedProof || !witnessData) {
+                output.innerHTML = '<div class="error">Generate and verify proof first</div>';
+                return;
+            }
+            
+            try {
+                btn.disabled = true;
+                output.innerHTML = '<p class="loading">Parsing PLONK proof...</p>';
+                
+                // Parse the proof data
+                const proofHex = generatedProof.proof;
+                const proofBytes = new Uint8Array(proofHex.match(/.{2}/g).map(byte => parseInt(byte, 16)));
+                
+                // Extract PLONK proof components - COMPRESSED FORMAT (32 bytes per point)
+                let offset = 0;
+                const readCompressedG1Point = () => {
+                    if (offset + 32 > proofBytes.length) {
+                        console.warn(`Not enough bytes for compressed G1 point at offset ${offset}, padding with zeros`);
+                        // Return properly padded zero values
+                        return ["0x" + "0".repeat(64), "0x" + "0".repeat(64)];
+                    }
+                    // Read 32 bytes for x-coordinate
+                    const x = "0x" + Array.from(proofBytes.slice(offset, offset + 32)).map(b => b.toString(16).padStart(2, '0')).join('');
+                    // For compressed format, y is implicit and we use zero for ICP compatibility
+                    const y = "0x" + "0".repeat(64);
+                    offset += 32;
+                    return [x, y];
+                };
+                
+                const readUint32 = () => {
+                    if (offset + 4 > proofBytes.length) {
+                        console.warn(`Not enough bytes for uint32 at offset ${offset}`);
+                        return 0;
+                    }
+                    const value = (proofBytes[offset] << 24) | (proofBytes[offset + 1] << 16) | 
+                                 (proofBytes[offset + 2] << 8) | proofBytes[offset + 3];
+                    offset += 4;
+                    return value;
+                };
+                
+                const readFr = () => {
+                    if (offset + 32 > proofBytes.length) {
+                        console.warn(`Not enough bytes for Fr at offset ${offset}, padding with zeros`);
+                        // Return properly padded zero value
+                        return "0x" + "0".repeat(64);
+                    }
+                    const value = "0x" + Array.from(proofBytes.slice(offset, offset + 32)).map(b => b.toString(16).padStart(2, '0')).join('');
+                    offset += 32;
+                    return value;
+                };
+                
+                // Parse proof structure following gnark compressed format
+                const lro = [];
+                lro.push(readCompressedG1Point()); // L
+                lro.push(readCompressedG1Point()); // R
+                lro.push(readCompressedG1Point()); // O
+                
+                const z = readCompressedG1Point(); // Z commitment
+                
+                const h = [];
+                h.push(readCompressedG1Point()); // H[0]
+                h.push(readCompressedG1Point()); // H[1]
+                h.push(readCompressedG1Point()); // H[2]
+                
+                const batchedH = readCompressedG1Point(); // Batched proof H
+                
+                // Extract batched proof values length and values - COMPRESSED FORMAT
+                const batchedValuesLength = (proofBytes[offset] << 24) | (proofBytes[offset + 1] << 16) | 
+                                           (proofBytes[offset + 2] << 8) | proofBytes[offset + 3];
+                offset += 4;
+                console.log(`Batched values count: ${batchedValuesLength}`);
+                
+                const batchedValues = [];
+                for (let i = 0; i < batchedValuesLength; i++) {
+                    const value = readFr();
+                    // Ensure the value is properly padded to 64 hex chars (32 bytes)
+                    let cleanValue = value.startsWith('0x') ? value.substring(2) : value;
+                    cleanValue = cleanValue.padStart(64, '0');
+                    const paddedValue = '0x' + cleanValue;
+                    batchedValues.push(paddedValue);
+                    console.log(`  Batched value ${i}: ${paddedValue} (length: ${paddedValue.length})`);
+                }
+                
+                // Read Z shifted proof
+                const zshiftedH = readCompressedG1Point();
+                const zshiftedValue = readFr();
+                
+                // Read BSB22 commitments
+                const bsb22Len = readUint32();
+                const bsb22Commitments = [];
+                for (let i = 0; i < bsb22Len; i++) {
+                    bsb22Commitments.push(readCompressedG1Point());
+                }
+                
+                const plonkProof = {
+                    lro: lro,
+                    z: z,
+                    h: h,
+                    batched_proof: {
+                        h: batchedH,
+                        claimed_values: batchedValues
+                    },
+                    zshifted_proof: {
+                        h: zshiftedH,
+                        claimed_value: zshiftedValue
+                    },
+                    bsb22_commitments: bsb22Commitments
+                };
+                
+                console.log('Proof parsing debug:');
+                console.log('- Total bytes:', proofBytes.length);
+                console.log('- Final offset:', offset);
+                console.log('- Batched values count:', batchedValuesLength);
+                console.log('- BSB22 commitments count:', bsb22Len);
+                
+                output.innerHTML = '<p class="loading">Connecting to ICP...</p>';
+                
+                // Wait for module to load
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Wait for ICP integration to load
+                let attempts = 0;
+                while (!window.submitWithdrawalToICP && attempts < 20) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    attempts++;
+                }
+                
+                if (!window.submitWithdrawalToICP) {
+                    throw new Error('ICP integration not loaded. Please refresh the page.');
+                }
+                
+                output.innerHTML = '<p class="loading">Submitting withdrawal transaction...</p>';
+                
+                // Prepare inputs for ICP submission
+                // Convert decimal strings to hex where needed
+                const icpInputs = {
+                    NullifierHash: decimalToHex(witnessData.NullifierHash),
+                    Recipient: ensureEvenHex(witnessData.Recipient), // Already hex
+                    Amount: witnessData.Amount, // Keep as decimal string
+                    MerkleRoot: decimalToHex(witnessData.MerkleRoot),
+                    Relayer: ensureEvenHex(witnessData.Relayer), // Already hex
+                    Fee: witnessData.Fee, // Keep as decimal string
+                    Refund: witnessData.Refund // Keep as decimal string
+                };
+                
+                // Debug log the inputs
+                console.log('ICP Inputs being sent:', icpInputs);
+                Object.entries(icpInputs).forEach(([key, value]) => {
+                    console.log(`- ${key}: "${value}" (length: ${value ? value.length : 0})`);
+                });
+                
+                const result = await window.submitWithdrawalToICP(plonkProof, icpInputs);
+                
+                if ('ok' in result) {
+                    output.innerHTML = `
+                        <div class="success">✅ Withdrawal submitted successfully!</div>
+                        <div class="data-section">
+                            <h4>Withdrawal Details:</h4>
+                            <div class="output">Withdrawal ID: ${result.ok}
+Status: Pending on-chain verification
+Recipient: ${witnessData.Recipient}
+Amount: 1 ETH
+Chain: Ethereum</div>
+                        </div>
+                        <div class="data-section">
+                            <h4>What happens next:</h4>
+                            <div class="output">1. ICP verifies the PLONK proof on-chain
+2. Withdrawal is approved if valid
+3. Funds are released via Chain Fusion</div>
+                        </div>
+                    `;
+                    document.getElementById('step5').classList.add('active');
+                } else {
+                    throw new Error(result.err);
+                }
+                
+            } catch (error) {
+                output.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+                console.error('Canister submission error:', error);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>

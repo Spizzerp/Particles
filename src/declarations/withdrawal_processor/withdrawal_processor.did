@@ -53,6 +53,39 @@ type NullifierHash = text;
 type MerkleRoot = text;
 type ChainId = nat;
 type Amount = nat;
+type PlonkProof = 
+ record {
+   lro: vec record {
+        text;
+        text;
+      };
+   z: record {
+        text;
+        text;
+      };
+   h: vec record {
+        text;
+        text;
+      };
+   batched_proof: record {
+        h: record {
+          text;
+          text;
+        };
+        claimed_values: vec text;
+      };
+   zshifted_proof: record {
+        h: record {
+          text;
+          text;
+        };
+        claimed_value: text;
+      };
+   bsb22_commitments: vec record {
+        text;
+        text;
+      };
+ };
 service : {
   batchProcessWithdrawals: (vec nat) -> (Result_2);
   getPendingWithdrawals: () -> (vec Withdrawal) query;
@@ -66,7 +99,7 @@ service : {
     }) query;
   getWithdrawalsByChain: (ChainId) -> (vec Withdrawal) query;
   initiateWithdrawal: (NullifierHash, text, Amount, TokenId, ChainId,
-   MerkleRoot, ZKProof) -> (Result_1);
+   MerkleRoot, PlonkProof) -> (Result_1);
   isNullifierUsed: (NullifierHash) -> (bool) query;
   processWithdrawal: (nat) -> (Result);
 }
