@@ -2,13 +2,13 @@
 
 ## 🚀 Project Overview
 
-Particle Fund is a cross-chain privacy pool application built on the Internet Computer Protocol (ICP) that enables private transactions across Bitcoin, Ethereum, and ICP using zero-knowledge proofs and pattern-breaking algorithms.
+Particle Fund is a cross-chain privacy pool application built on the Internet Computer Protocol (ICP) that enables private transactions across Bitcoin, Ethereum, Solana, and ICP using zero-knowledge proofs and pattern-breaking algorithms.
 
 ### Key Features
 - **Zero-Knowledge Privacy**: PLONK proof system for complete transaction privacy
-- **Cross-Chain Support**: Native integration with Bitcoin and Ethereum via ICP's Chain Fusion
+- **Cross-Chain Support**: Native integration with Bitcoin, Ethereum, and Solana via ICP's Chain Fusion
 - **Pattern Breaking**: Advanced algorithms to prevent transaction graph analysis
-- **No Bridges Required**: Direct cross-chain transactions using threshold ECDSA
+- **No Bridges Required**: Direct cross-chain transactions using threshold ECDSA and Ed25519
 - **Fully Decentralized**: All verification happens on-chain with no trusted setup per circuit
 
 ## 🏗️ Current State of Application
@@ -22,23 +22,24 @@ Particle Fund is a cross-chain privacy pool application built on the Internet Co
    - Pattern Breaker for transaction obfuscation
    - Crypto Components for ZK operations
 
-2. **PLONK Integration**
-   - Successfully deployed PLONK verifier canister
-   - Implemented proof serialization matching gnark format
-   - Created verification key management system
-   - Fixed PlonkProof type definitions
+2. **PLONK Zero-Knowledge Proof System** ✨ **FULLY WORKING**
+   - Full PLONK proof generation in browser (~5 seconds)
+   - On-chain verification using plonk_verifier_on_icp
+   - 25,969 constraint production circuit
+   - Successful end-to-end withdrawals verified on ICP
+   - Double-spend prevention via nullifier tracking
 
 3. **Frontend Infrastructure**
    - React/TypeScript application with Vite
-   - Internet Identity authentication ready
-   - Mock UI for deposits and withdrawals
+   - Internet Identity authentication (to be removed for privacy)
+   - Working deposit and withdrawal UI
    - Integration with ICP agent-js
 
-4. **Zero-Knowledge Proof Generation**
-   - **Step 1 Complete**: Browser-based proof generation working
-   - WASM-based prover using Go and gnark
-   - Custom import loader for Go/WASM compatibility
-   - Test infrastructure for incremental circuit building
+4. **Cryptographic Implementation**
+   - MiMC hash function matching gnark-crypto
+   - 20-level Merkle tree (2^20 leaves)
+   - Poseidon hash support ready
+   - BN254 curve operations
 
 ### 📊 Technical Stack
 - **Backend**: Motoko (ICP smart contracts)
@@ -47,37 +48,38 @@ Particle Fund is a cross-chain privacy pool application built on the Internet Co
 - **Cryptography**: BN254 curve, MiMC hash, Merkle trees
 - **Cross-Chain**: ICP Chain Fusion, threshold ECDSA
 
-## 🔬 Step 1: Nullifier-Only Circuit (COMPLETED)
+## 🎉 Production PLONK Circuit (COMPLETED)
 
 ### What We Built
-Created the foundational circuit that proves knowledge of a nullifier:
-- **Circuit**: Proves `Hash(nullifier) == nullifierHash`
-- **Constraints**: 442 (using MiMC hash)
-- **WASM Size**: 3.0MB (standard Go compiler)
-- **Proof Generation**: ~4ms in browser (mock)
+Full production privacy pool circuit with complete deposit/withdrawal functionality:
+- **Circuit**: Proves valid withdrawal from Merkle tree with nullifier
+- **Constraints**: 25,969 (full production circuit)
+- **WASM Size**: 21MB (includes proving key)
+- **Proof Generation**: ~5 seconds in browser
+- **Verification Cost**: ~$0.08 per withdrawal on ICP
 
 ### Key Achievements
-1. Successfully compiled gnark circuit to WASM
-2. Established JavaScript ↔ Go communication in browser
-3. Fixed Go version compatibility issues (custom "gojs" → "go" import mapping)
-4. Created working test page with proof generation
-5. Validated the entire build pipeline
+1. ✅ Full PLONK proof generation in WASM
+2. ✅ On-chain verification with plonk_verifier_on_icp
+3. ✅ Successful withdrawal #13 verified on ICP
+4. ✅ Double-spend prevention working
+5. ✅ End-to-end privacy pool operational
 
 ### Technical Implementation
 ```go
-type NullifierOnlyCircuit struct {
+type WithdrawCircuit struct {
+    // Public inputs
+    MerkleRoot    frontend.Variable `gnark:",public"`
     NullifierHash frontend.Variable `gnark:",public"`
-    Nullifier     frontend.Variable `gnark:",secret"`
+    Recipient     frontend.Variable `gnark:",public"`
+    Amount        frontend.Variable `gnark:",public"`
+    // Private inputs
+    Secret        frontend.Variable
+    Nullifier     frontend.Variable
+    MerklePath    [20]frontend.Variable
+    MerkleIndices [20]frontend.Variable
 }
 ```
-
-## 🚧 Remaining Steps: Circuit Roadmap
-
-### Step 2: Commitment Circuit (Next)
-- **Adds**: Secret input and commitment calculation
-- **Proves**: `Hash(secret, nullifier) == commitment`
-- **Expected Constraints**: ~880
-- **Purpose**: Forms the basis for deposit commitments
 
 ### Step 3: Basic Merkle Circuit
 - **Adds**: 5-level Merkle tree verification

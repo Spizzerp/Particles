@@ -1,7 +1,7 @@
 # Particle Funds - Development Guide
 
 ## Project Overview
-Cross-chain privacy pool application on Internet Computer Protocol (ICP) with zero-knowledge proofs and pattern breaking algorithms.
+Cross-chain privacy pool application on Internet Computer Protocol (ICP) with zero-knowledge proofs and pattern breaking algorithms. Supports Bitcoin, Ethereum, and Solana through ICP's Chain Fusion technology.
 
 ## Important Commands
 
@@ -42,7 +42,8 @@ npm run build
 
 ### 2. Chain Fusion Integration
 - Bitcoin: Direct network integration with threshold ECDSA
-- Ethereum: HTTPS outcalls to RPC providers
+- Ethereum: HTTPS outcalls to RPC providers + t-ECDSA
+- Solana: Threshold Ed25519 signatures for native integration
 - Cross-chain deposits and withdrawals
 - No bridges required
 
@@ -71,8 +72,8 @@ We're using PLONK for complete cryptographic verification on ICP:
 See `circuits/ZK_ARCHITECTURE.md` for full technical details.
 
 ## Next Steps
-1. Implement Internet Identity authentication
-2. Create Chain Fusion adapters for Bitcoin/Ethereum
+1. Remove authentication requirements (privacy first)
+2. Create Chain Fusion adapters for Bitcoin/Ethereum/Solana
 3. Update UI for multi-chain support
 4. Test cross-chain transactions on testnets
 

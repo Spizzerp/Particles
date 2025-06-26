@@ -1,163 +1,136 @@
-# Implementation Plan: Canister ZK Integration
+# Implementation Plan: Particle Funds
 
-## Immediate Priority: Hash Function Update
+## Current Status
+✅ **PLONK ZK Proof System**: Fully implemented and verified on ICP
+✅ **Browser WASM Prover**: Working with ~5 second proof generation
+✅ **On-chain Verification**: Using plonk_verifier_on_icp canister
+✅ **Double-spend Prevention**: Nullifier tracking implemented
 
-### Step 1: Research Poseidon Implementation for Motoko
-**Estimated Time**: 2-4 hours
-**Complexity**: High
+## Next Implementation Priorities
 
-Since Motoko doesn't have a native Poseidon implementation, we have several options:
+### 1. Chain Fusion Integration
 
-#### Option A: Port Poseidon to Motoko (Recommended)
-```motoko
-// Create new file: src/crypto/Poseidon.mo
-module {
-    // Poseidon constants for BN254
-    private let ROUND_CONSTANTS : [[Nat]] = [...];
-    private let MDS_MATRIX : [[Nat]] = [...];
-    
-    public func hash2(left: Blob, right: Blob) : Blob {
-        // Implementation
-    };
-}
-```
-
-#### Option B: Use External Canister
-- Deploy a Rust canister with Poseidon
-- Call it from Motoko canisters
-- Pros: Easier, more efficient
-- Cons: Extra inter-canister calls
-
-#### Option C: Simplified MiMC
-- Implement MiMC (simpler than Poseidon)
-- Must match gnark's MiMC exactly
-- Fewer rounds than Poseidon
-
-### Step 2: Update Commitment Generation
-**Files to modify**:
-- `src/canisters/CryptoComponents.mo`
-
-```motoko
-// Old:
-public func generateCommitment(secret: Text, nullifier: Text, amount: Nat) : async Result.Result<Types.CommitmentHash, Text> {
-    let data = secret # nullifier # Nat.toText(amount);
-    let commitment = await hash(data);
-    #ok(commitment)
-};
-
-// New:
-public func generateCommitment(secret: Blob, nullifier: Blob, amount: Nat) : async Result.Result<Types.CommitmentHash, Text> {
-    // Convert amount to 32-byte blob
-    let amountBlob = natTo32Bytes(amount);
-    
-    // Hash(secret, nullifier, amount)
-    let commitment = await poseidonHash3(secret, nullifier, amountBlob);
-    #ok(blobToHex(commitment))
-};
-```
-
-### Step 3: Fix Merkle Tree
-**Critical Changes**:
-1. Fixed 20-level depth
-2. Proper sibling ordering
-3. Sparse tree optimization
-
-```motoko
-// Updated Merkle tree structure
-private let TREE_DEPTH : Nat = 20;
-private let MAX_LEAVES : Nat = 1_048_576; // 2^20
-
-private var leafNodes : Map.HashMap<Nat, Blob> = Map.HashMap(100, Nat.equal, Hash.hash);
-private var nodes : Map.HashMap<(Nat, Nat), Blob> = Map.HashMap(1000, pairEqual, pairHash);
-```
-
-### Step 4: Complete WASM Proof Generation
-
-**Current State**: Mock proofs
-**Needed**: Real gnark integration
+#### 1.1 Bitcoin Integration
+**Estimated Time**: 1 week
+**Technology**: ICP's threshold ECDSA (t-ECDSA)
 
 Key tasks:
-1. Load proving key properly
-2. Create witness from inputs
-3. Generate actual PLONK proof
-4. Serialize for ICP
+- Create Bitcoin adapter canister
+- Implement deposit detection using Bitcoin API
+- Handle withdrawal transactions via threshold ECDSA
+- No bridges needed - direct Bitcoin network access
 
-### Step 5: Testing Flow
+#### 1.2 Ethereum Integration  
+**Estimated Time**: 1 week
+**Technology**: HTTPS outcalls to RPC providers + t-ECDSA
 
-```bash
-# 1. Deploy locally
-dfx start --clean
-dfx deploy
+Key tasks:
+- Create Ethereum adapter canister
+- Implement smart contract monitoring
+- Handle deposits via event logs
+- Execute withdrawals using HTTPS outcalls
 
-# 2. Make test deposit
-dfx canister call deposit_manager deposit '(
-    1000000000000000000,
-    "ETH",
-    1,
-    "0x2e2a04a682d8bde3d7b49b52e69ab847974f1a8e72986aed197cf923ac9fb80e"
-)'
+#### 1.3 Solana Integration 🆕
+**Estimated Time**: 1 week
+**Technology**: ICP's threshold Ed25519 signatures
 
-# 3. Generate proof (frontend)
-# Use WASM module with real proof generation
+Key tasks:
+- Create Solana adapter canister
+- Implement SPL token support
+- Monitor Solana transactions via RPC
+- Execute withdrawals using threshold Ed25519
+- Support for native SOL and SPL tokens
 
-# 4. Submit withdrawal
-dfx canister call withdrawal_processor processWithdrawal '(
-    record {
-        nullifier = "0x1c40adadec88e4f79650d1e0c908a92bf687083f8c4fbcefb8dd78d2b88d73e8";
-        recipient = "0x1234567890123456789012345678901234567890";
-        relayer = "0x0000000000000000000000000000000000000000";
-        fee = 0;
-        amount = 1000000000000000000;
-        proof = ...
-    }
-)'
+### 2. Remove Authentication System
+
+The current Internet Identity authentication defeats the privacy purpose. Tasks:
+- Remove authentication requirements from deposit/withdrawal flows
+- Keep principals anonymous for canister calls
+- Move to client-side secret management
+- Optional auth only for non-privacy features (if any)
+
+### 3. Production Deployment
+
+#### 3.1 Mainnet Deployment
+- Deploy canisters to ICP mainnet
+- Configure Bitcoin/Ethereum mainnet connections
+- Set up monitoring and alerts
+- Implement rate limiting and security measures
+
+#### 3.2 UI Improvements
+- Multi-chain deposit/withdrawal UI
+- Better secret/nullifier management
+- Transaction history (client-side only)
+- Mobile responsive design
+
+## Technical Architecture
+
+### Current Working System
+```
+User → Browser WASM Prover → ICP Canister → PLONK Verifier
+         ↓                      ↓
+    Generate Proof         Verify & Store
 ```
 
-## Development Checklist
+### Target Multi-Chain Architecture
+```
+Bitcoin ←→ Bitcoin Adapter ←→ Deposit Manager ←→ UI
+                                    ↓
+Ethereum ←→ Ethereum Adapter ←→ Withdrawal Processor ←→ PLONK Verifier
+                                    ↓
+Solana ←→ Solana Adapter ←→ Pattern Breaker
+```
 
-### Week 1: Cryptographic Foundation
-- [ ] Day 1-2: Implement Poseidon/MiMC in Motoko
-- [ ] Day 3: Update all hash functions in CryptoComponents
-- [ ] Day 4: Fix Merkle tree implementation
-- [ ] Day 5: Test hash compatibility with gnark
+## Implementation Timeline
 
-### Week 2: Proof Integration
-- [ ] Day 1-2: Complete WASM proof generation
-- [ ] Day 3: Test proof generation in browser
-- [ ] Day 4: Update canister interfaces
-- [ ] Day 5: End-to-end testing
+### Week 1: Bitcoin Integration
+- [ ] Day 1-2: Bitcoin adapter canister setup
+- [ ] Day 3-4: Deposit detection implementation
+- [ ] Day 5: Withdrawal transaction handling
+- [ ] Day 6-7: Testing on Bitcoin testnet
 
-### Week 3: Chain Integration
-- [ ] Day 1-2: Bitcoin adapter
-- [ ] Day 3-4: Ethereum adapter
-- [ ] Day 5: Multi-chain testing
+### Week 2: Ethereum Integration
+- [ ] Day 1-2: Ethereum adapter canister setup
+- [ ] Day 3-4: Smart contract event monitoring
+- [ ] Day 5: Withdrawal execution via HTTPS outcalls
+- [ ] Day 6-7: Testing on Sepolia testnet
+
+### Week 3: Solana Integration
+- [ ] Day 1-2: Solana adapter canister setup
+- [ ] Day 3: Implement threshold Ed25519 signatures
+- [ ] Day 4: SPL token support
+- [ ] Day 5: Transaction monitoring via RPC
+- [ ] Day 6-7: Testing on Solana devnet
+
+### Week 4: Production Preparation
+- [ ] Day 1-2: Remove authentication requirements
+- [ ] Day 3-4: UI updates for multi-chain (BTC, ETH, SOL)
+- [ ] Day 5: Security audit
+- [ ] Day 6-7: Mainnet deployment
 
 ## Risk Mitigation
 
-### Risk: Poseidon too complex for Motoko
-**Mitigation**: Use external Rust canister
+### Risk: HTTPS outcall limits for Ethereum
+**Mitigation**: Batch requests, use multiple RPC providers
 
-### Risk: Proof generation too slow
-**Mitigation**: Optimize witness generation, consider proof caching
+### Risk: Bitcoin transaction delays
+**Mitigation**: Show pending deposits, require confirmations
 
-### Risk: Storage limits for Merkle tree
-**Mitigation**: Implement sparse tree, consider off-chain storage
-
-### Risk: Hash function mismatch
-**Mitigation**: Extensive unit tests comparing with gnark output
+### Risk: Key management for withdrawals
+**Mitigation**: Clear UX for secret/nullifier storage
 
 ## Success Criteria
 
-1. **Hash Compatibility**: Motoko hash output matches gnark exactly
-2. **Proof Generation**: < 5 seconds in browser
-3. **Verification**: 100% success rate with valid proofs
-4. **Gas Usage**: Within ICP canister limits
-5. **Security**: No double-spends possible
+1. **Multi-chain Support**: Seamless Bitcoin, Ethereum & Solana deposits/withdrawals
+2. **Privacy Maintained**: No linking between deposits and withdrawals
+3. **Performance**: < 10 second end-to-end transaction time
+4. **Reliability**: 99.9% uptime for core functions
+5. **Security**: No vulnerabilities in audit
 
 ## Next Immediate Action
 
-Start with Poseidon/MiMC implementation research:
-1. Check if any Motoko crypto libraries exist
-2. Study gnark's MiMC implementation
-3. Create simplified version for Motoko
-4. Test compatibility
+Start with Bitcoin adapter implementation:
+1. Create new canister for Bitcoin integration
+2. Implement Bitcoin API calls
+3. Test deposit detection on testnet
+4. Implement threshold ECDSA for withdrawals
