@@ -1,0 +1,25 @@
+type Config = record {
+  ecdsa_key_name : text;
+  chain_id : nat64;
+  evm_rpc_canister_id : principal;
+};
+
+type TransactionResult = record {
+  tx_hash : text;
+  tx_hex : text;
+};
+
+type SignedTransaction = record {
+  tx_hex : text;
+  tx_hash : text;
+};
+
+service : {
+  "greet" : (text) -> (text) query;
+  "generate_address" : (principal, blob) -> (variant { Ok : text; Err : text });
+  "test_sign_transaction" : (principal, blob) -> (variant { Ok : SignedTransaction; Err : text });
+  "forward_deposit" : (principal, blob, text, text, text) -> (variant { Ok : TransactionResult; Err : text });
+  "get_nonce" : (text) -> (nat64) query;
+  "set_config" : (Config) -> (variant { Ok; Err : text });
+  "get_config" : () -> (Config) query;
+}

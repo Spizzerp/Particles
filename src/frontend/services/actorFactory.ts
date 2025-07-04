@@ -6,10 +6,8 @@ import { idlFactory as depositManagerIDL } from './candid/depositManager.did.js'
 import { idlFactory as withdrawalProcessorIDL } from './candid/withdrawalProcessor.did.js';
 import type {
   DepositManagerService,
-  ParticleRouterService,
   WithdrawalProcessorService,
   PatternBreakerService,
-  CryptoComponentsService,
 } from './types';
 
 // Cache for actors to avoid recreating them
@@ -40,6 +38,9 @@ const createDepositManagerIDL = (): IDL.InterfaceFactory => {
     getUserDeposits: IDL.Func([IDL.Principal], [IDL.Vec(Deposit)], ['query']),
     getTotalDeposits: IDL.Func([], [IDL.Nat], ['query']),
     getMerkleRoot: IDL.Func([IDL.Nat], [IDL.Opt(IDL.Text)], ['query']),
+    getCurrentMerkleRoot: IDL.Func([], [IDL.Opt(IDL.Text)], ['query']),
+    getLeafCount: IDL.Func([], [IDL.Nat], ['query']),
+    getMerkleProof: IDL.Func([IDL.Nat], [IDL.Variant({ ok: IDL.Vec(IDL.Text), err: IDL.Text })], ['query']),
     updateMerkleTree: IDL.Func(
       [IDL.Nat, IDL.Text],
       [IDL.Variant({ ok: IDL.Null, err: IDL.Text })],
@@ -84,113 +85,14 @@ export const getDepositManagerActor = async (identity?: Identity): Promise<Actor
   return actor;
 };
 
-// For now, we'll create a mock service for development
-export const createMockDepositManagerActor = (): DepositManagerService => {
-  return {
-    deposit: async (amount, tokenId, chainId, commitment) => {
-      console.log('Mock deposit:', { amount, tokenId, chainId, commitment });
-      return { ok: BigInt(Math.floor(Math.random() * 1000)) };
-    },
-    getDeposit: async (depositId) => {
-      console.log('Mock getDeposit:', depositId);
-      // Return a mock deposit for testing
-      return {
-        id: depositId,
-        user: Principal.fromText('2vxsx-fae'), // Anonymous principal
-        amount: BigInt(1000000), // 1 token with 6 decimals
-        tokenId: 'ICP',
-        chainId: BigInt(0),
-        commitment: '0x' + Array(64).fill('a').join(''),
-        timestamp: BigInt(Date.now()),
-        leafIndex: BigInt(0)
-      };
-    },
-    getUserDeposits: async (user) => {
-      console.log('Mock getUserDeposits:', user.toString());
-      return [];
-    },
-    getTotalDeposits: async () => {
-      return BigInt(0);
-    },
-    getMerkleRoot: async (level) => {
-      // Return a mock merkle root
-      return '0x' + Array(64).fill('a').join('');
-    },
-    getMerkleProof: async (commitment) => {
-      // Return a mock merkle proof
-      console.log('Mock getMerkleProof:', commitment);
-      return [
-        '0x' + Array(64).fill('b').join(''),
-        '0x' + Array(64).fill('c').join(''),
-        '0x' + Array(64).fill('d').join('')
-      ];
-    },
-    updateMerkleTree: async (level, root) => {
-      return { ok: null };
-    },
-  };
-};
-
-// Mock Withdrawal Processor Service
-export const createMockWithdrawalProcessorActor = (): WithdrawalProcessorService => {
-  const usedNullifiers = new Set<string>();
-  
-  return {
-    initiateWithdrawal: async (nullifier, recipient, amount, tokenId, chainId, merkleRoot, proof) => {
-      console.log('Mock initiateWithdrawal:', { nullifier, recipient, amount });
-      if (usedNullifiers.has(nullifier)) {
-        return { err: 'Nullifier already used' };
-      }
-      usedNullifiers.add(nullifier);
-      return { ok: BigInt(Math.floor(Math.random() * 1000)) };
-    },
-    processWithdrawal: async (withdrawalId) => {
-      console.log('Mock processWithdrawal:', withdrawalId);
-      return { ok: null };
-    },
-    batchProcessWithdrawals: async (withdrawalIds) => {
-      console.log('Mock batchProcessWithdrawals:', withdrawalIds);
-      return { ok: withdrawalIds };
-    },
-    getWithdrawal: async (withdrawalId) => {
-      console.log('Mock getWithdrawal:', withdrawalId);
-      return undefined;
-    },
-    getPendingWithdrawals: async () => {
-      return [];
-    },
-    getProcessedWithdrawals: async () => {
-      return [];
-    },
-    isNullifierUsed: async (nullifier) => {
-      return usedNullifiers.has(nullifier);
-    },
-    getWithdrawalsByChain: async (chainId) => {
-      return [];
-    },
-    getWithdrawalStats: async () => {
-      return {
-        total: BigInt(0),
-        pending: BigInt(0),
-        processed: BigInt(0),
-      };
-    },
-  };
-};
 
 // Export a function to get the appropriate actor based on environment
 export const getDepositManager = async (identity?: Identity): Promise<DepositManagerService> => {
-  // For now, always return mock while we don't have deployed canisters
   if (!CANISTER_IDS.depositManager) {
-    return createMockDepositManagerActor();
+    throw new Error('Deposit Manager canister ID not configured');
   }
   
-  try {
-    return await getDepositManagerActor(identity);
-  } catch (error) {
-    console.error('Failed to create actor, falling back to mock:', error);
-    return createMockDepositManagerActor();
-  }
+  return await getDepositManagerActor(identity);
 };
 
 // Actor creation for withdrawal processor
@@ -217,16 +119,77 @@ export const getWithdrawalProcessorActor = async (identity?: Identity): Promise<
 // Export a function to get the withdrawal processor
 export const getWithdrawalProcessor = async (identity?: Identity): Promise<WithdrawalProcessorService> => {
   if (!CANISTER_IDS.withdrawalProcessor) {
-    return createMockWithdrawalProcessorActor();
+    throw new Error('Withdrawal Processor canister ID not configured');
   }
   
-  try {
-    return await getWithdrawalProcessorActor(identity);
-  } catch (error) {
-    console.error('Failed to create withdrawal processor actor, falling back to mock:', error);
-    return createMockWithdrawalProcessorActor();
-  }
+  return await getWithdrawalProcessorActor(identity);
 };
+
+// Actor creation for Ethereum Adapter
+export const getEthereumAdapterActor = async (identity?: Identity): Promise<ActorSubclass<any>> => {
+  const cacheKey = `ethereumAdapter_${identity ? identity.getPrincipal().toString() : 'anonymous'}`;
+  
+  if (actorCache.has(cacheKey)) {
+    return actorCache.get(cacheKey) as ActorSubclass<any>;
+  }
+
+  const agent = await createAgent(identity);
+  
+  // Create IDL factory for Ethereum Adapter
+  const ethereumAdapterIDL = ({ IDL }: any) => {
+    return IDL.Service({
+      checkDeposits: IDL.Func([], [IDL.Variant({ ok: IDL.Vec(IDL.Record({
+        commitment: IDL.Text,
+        amount: IDL.Nat,
+        sender: IDL.Text,
+        blockNumber: IDL.Nat,
+        txHash: IDL.Text,
+        timestamp: IDL.Int,
+      })), err: IDL.Text })], []),
+      getCurrentMerkleRoot: IDL.Func([], [IDL.Variant({ ok: IDL.Text, err: IDL.Text })], ['query']),
+      getPoolAddress: IDL.Func([], [IDL.Text], []),
+      getDepositAddress: IDL.Func([IDL.Principal, IDL.Text, IDL.Nat], [IDL.Variant({ ok: IDL.Text, err: IDL.Text })], []),
+      getDepositAddressV2: IDL.Func([IDL.Principal, IDL.Text, IDL.Nat], [IDL.Variant({ ok: IDL.Text, err: IDL.Text })], []),
+      processDepositAddresses: IDL.Func([], [IDL.Variant({ ok: IDL.Vec(IDL.Text), err: IDL.Text })], []),
+      setDepositContract: IDL.Func([IDL.Text], [IDL.Variant({ ok: IDL.Null, err: IDL.Text })], []),
+      getDepositInfo: IDL.Func([IDL.Text], [IDL.Opt(IDL.Record({
+        commitment: IDL.Text,
+        amount: IDL.Nat,
+        timestamp: IDL.Int,
+        userId: IDL.Principal,
+        processed: IDL.Bool,
+      }))], ['query']),
+      processSingleDeposit: IDL.Func([IDL.Text], [IDL.Variant({ ok: IDL.Text, err: IDL.Text })], []),
+      processSingleDepositV2: IDL.Func([IDL.Text], [IDL.Variant({ ok: IDL.Text, err: IDL.Text })], []),
+    });
+  };
+
+  const actor = Actor.createActor<any>(
+    ethereumAdapterIDL,
+    {
+      agent,
+      canisterId: CANISTER_IDS.ethereumAdapter,
+    }
+  );
+
+  actorCache.set(cacheKey, actor);
+  return actor;
+};
+
+
+// Export helper functions
+export const getEthereumAdapter = async (identity?: Identity) => {
+  if (!CANISTER_IDS.ethereumAdapter) {
+    throw new Error('Ethereum Adapter canister ID not configured');
+  }
+  
+  console.log('Using Ethereum Adapter canister ID:', CANISTER_IDS.ethereumAdapter);
+  console.log('IC_HOST:', IC_HOST);
+  console.log('IS_LOCAL:', IS_LOCAL);
+  
+  return await getEthereumAdapterActor(identity);
+};
+
 
 // Clear cache when identity changes
 export const clearActorCache = () => {

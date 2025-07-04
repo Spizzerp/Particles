@@ -90,4 +90,27 @@ actor DepositManager {
         merkleTree.put(level, root);
         #ok()
     };
+    
+    // Get the current merkle root (at level 0)
+    public query func getCurrentMerkleRoot() : async ?Types.MerkleRoot {
+        merkleTree.get(0)
+    };
+    
+    // Get the total number of deposits (leaf count)
+    public query func getLeafCount() : async Nat {
+        nextDepositId
+    };
+    
+    // Get merkle proof for a deposit
+    // Note: This is a placeholder - in production, you'd need proper merkle proof generation
+    public query func getMerkleProof(depositId: Nat) : async Result.Result<[Text], Text> {
+        switch (deposits.get(depositId)) {
+            case null { #err("Deposit not found") };
+            case (?deposit) {
+                // In a real implementation, you'd generate the actual merkle proof
+                // For now, return a mock proof
+                #ok([deposit.commitment, "mock_sibling_1", "mock_sibling_2"])
+            };
+        }
+    };
 }

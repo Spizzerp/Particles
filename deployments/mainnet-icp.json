@@ -1,0 +1,11 @@
+{
+  "network": "ic",
+  "ethereumAdapter": "55iy2-vaaaa-aaaas-amn7a-cai",
+  "poolAddress": "0xd08115f9a913ff867d38d36313738e982f63b953",
+  "depositContract": "0x9b0721C174b103facEC1EeE435679Ae9C493163C",
+  "deployedAt": "2025-06-26T00:00:00.000Z",
+  "candidUI": "https://a4gq6-oaaaa-aaaab-qaa4q-cai.raw.icp0.io/?id=55iy2-vaaaa-aaaas-amn7a-cai",
+  "depositManager": "hhveh-piaaa-aaaaj-a2dga-cai",
+  "withdrawalProcessor": "hauct-cqaaa-aaaaj-a2dgq-cai",
+  "frontend": "ilp5a-2aaaa-aaaad-qhmna-cai"
+}

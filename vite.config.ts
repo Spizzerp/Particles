@@ -1,8 +1,29 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { resolve } from 'path';
+import { nodePolyfills } from 'vite-plugin-node-polyfills';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    nodePolyfills({
+      globals: {
+        Buffer: true,
+        global: true,
+        process: true
+      },
+      protocolImports: true
+    })
+  ],
+  root: 'src/frontend',
+  publicDir: '../../public',
+  build: {
+    outDir: '../../dist',
+    emptyOutDir: true,
+    rollupOptions: {
+      input: resolve(__dirname, 'src/frontend/index.html'),
+    }
+  },
   resolve: {
     alias: {
       '@': '/src'
@@ -20,6 +41,9 @@ export default defineConfig({
     }
   },
   define: {
-    global: 'globalThis',
+    'process.env': {}
+  },
+  optimizeDeps: {
+    include: ['buffer', 'circomlibjs']
   }
 });

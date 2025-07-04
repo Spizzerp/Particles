@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "src/canisters/plonk_verifier_on_icp_backend",
-    "src/canisters/hash_canister",
+    "src/canisters/keccak256",
+    "src/canisters/eth_transaction_handler",
 ]
 resolver = "2"

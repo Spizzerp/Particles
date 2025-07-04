@@ -1,42 +1,349 @@
 .deposit-page {
   max-width: 800px;
   margin: 0 auto;
-  padding-top: 2rem;
+  padding: 2rem;
 }
 
 .page-title {
+  font-family: var(--font-primary);
+  font-size: 3rem;
+  font-weight: 300;
   text-align: center;
   margin-bottom: 3rem;
-  font-size: 3rem;
-  font-family: var(--font-primary);
-  font-weight: 300;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  position: relative;
   color: var(--color-background);
 }
 
-.page-title::after {
-  content: '';
-  position: absolute;
-  bottom: -1rem;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 100px;
-  height: 1px;
-  background: var(--primary-color);
-  opacity: 0.3;
-}
-
 .deposit-container {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 2rem;
 }
 
-.deposit-form {
-  max-width: 500px;
+/* Selection Step */
+.deposit-form h2 {
+  font-family: var(--font-primary);
+  font-size: 1.8rem;
+  font-weight: 400;
+  margin-bottom: 2rem;
+  color: var(--color-background);
+}
+
+.selection-group {
+  margin-bottom: 2rem;
+}
+
+.selection-group label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 1rem;
+  color: var(--color-background);
+  opacity: 0.7;
+}
+
+.chain-options,
+.token-options,
+.amount-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+}
+
+.chain-option,
+.token-option,
+.amount-option {
+  background: rgba(255, 255, 255, 0.5);
+  border: 2px solid rgba(20, 24, 30, 0.1);
+  padding: 1.5rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-align: center;
+  font-family: var(--font-mono);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.chain-option:hover,
+.token-option:hover,
+.amount-option:hover {
+  background: rgba(255, 255, 255, 0.8);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.chain-option.selected,
+.token-option.selected,
+.amount-option.selected {
+  background: var(--color-background);
+  color: white;
+  border-color: var(--color-background);
+}
+
+.chain-icon,
+.token-icon {
+  font-size: 2rem;
+}
+
+.chain-name,
+.token-name {
+  font-size: 0.875rem;
+}
+
+.amount-option {
+  font-size: 1.1rem;
+  font-weight: 600;
+  padding: 1rem;
+}
+
+/* Address Step */
+.deposit-address-view h2 {
+  font-family: var(--font-primary);
+  font-size: 1.8rem;
+  font-weight: 400;
+  margin-bottom: 2rem;
+  color: var(--color-background);
+  text-align: center;
+}
+
+.deposit-info {
+  text-align: center;
+}
+
+.deposit-instruction {
+  font-size: 1.1rem;
+  margin-bottom: 2rem;
+  color: var(--color-background);
+}
+
+.address-display {
+  background: rgba(20, 24, 30, 0.05);
+  border: 2px solid rgba(20, 24, 30, 0.1);
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.deposit-address {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  word-break: break-all;
+  flex: 1;
+}
+
+.copy-btn {
+  background: var(--color-background);
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+}
+
+.copy-btn:hover {
+  background: var(--primary-color);
+  transform: translateY(-1px);
+}
+
+.qr-placeholder {
+  margin: 2rem 0;
+}
+
+.qr-code {
+  width: 200px;
+  height: 200px;
+  background: rgba(20, 24, 30, 0.05);
+  border: 2px solid rgba(20, 24, 30, 0.1);
   margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  color: rgba(20, 24, 30, 0.3);
+}
+
+.timer-section {
+  margin: 2rem 0;
+}
+
+.timer-bar {
   width: 100%;
+  height: 8px;
+  background: rgba(20, 24, 30, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 0.5rem;
+}
+
+.timer-progress {
+  height: 100%;
+  background: var(--primary-color);
+  transition: width 1s linear;
+}
+
+.warning-text {
+  color: var(--error-color);
+  font-size: 0.9rem;
+  margin-top: 1rem;
+}
+
+.network-info {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 4px;
+}
+
+.network-info p {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.9rem;
+}
+
+.network-info a {
+  color: var(--primary-color);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.network-info a:hover {
+  text-decoration: underline;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin-top: 2rem;
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--color-background);
+  border: 2px solid var(--color-background);
+}
+
+.btn-secondary:hover {
+  background: rgba(20, 24, 30, 0.05);
+}
+
+/* Waiting Step */
+.waiting-view {
+  text-align: center;
+  padding: 4rem 2rem;
+}
+
+.waiting-view h2 {
+  font-family: var(--font-primary);
+  font-size: 1.8rem;
+  font-weight: 400;
+  margin-bottom: 2rem;
+  color: var(--color-background);
+}
+
+.loading-spinner {
+  margin: 2rem 0;
+}
+
+.spinner {
+  width: 50px;
+  height: 50px;
+  border: 3px solid rgba(20, 24, 30, 0.1);
+  border-top-color: var(--primary-color);
+  border-radius: 50%;
+  margin: 0 auto;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.sub-text {
+  color: rgba(20, 24, 30, 0.6);
+  font-size: 0.9rem;
+}
+
+/* Complete Step */
+.complete-view {
+  text-align: center;
+  padding: 3rem;
+}
+
+.success-icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+}
+
+.complete-view h2 {
+  font-family: var(--font-primary);
+  font-size: 2rem;
+  font-weight: 400;
+  margin-bottom: 2rem;
+  color: var(--success-color);
+}
+
+.transaction-info {
+  margin: 2rem 0;
+}
+
+.tx-hash {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--color-background);
+  opacity: 0.7;
+  word-break: break-all;
+  margin-top: 0.5rem;
+}
+
+.commitment-section {
+  background: rgba(255, 200, 0, 0.1);
+  border: 2px solid rgba(255, 200, 0, 0.3);
+  border-radius: 8px;
+  padding: 2rem;
+  margin: 2rem 0;
+}
+
+.commitment-section h3 {
+  font-family: var(--font-primary);
+  font-size: 1.5rem;
+  font-weight: 400;
+  margin-bottom: 1rem;
+  color: var(--color-background);
+}
+
+.commitment-warning {
+  color: var(--error-color);
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+.commitment-display {
+  background: white;
+  border: 2px solid rgba(20, 24, 30, 0.1);
+  border-radius: 4px;
+  padding: 1rem;
+  margin: 1rem 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.commitment-value {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  word-break: break-all;
+  color: var(--color-background);
 }
 
 .deposit-btn {
@@ -44,134 +351,30 @@
   margin-top: 1rem;
 }
 
-.commitment-section {
-  background: rgba(16, 185, 129, 0.05);
-  border: 1px solid rgba(16, 185, 129, 0.2);
-  box-shadow: 0 4px 20px rgba(16, 185, 129, 0.1);
-}
+/* Responsive */
+@media (max-width: 768px) {
+  .deposit-page {
+    padding: 1rem;
+  }
 
-.commitment-section h3 {
-  color: var(--success-color);
-  margin-bottom: 1rem;
-  font-family: var(--font-mono);
-  font-size: 1rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
+  .page-title {
+    font-size: 2rem;
+  }
 
-.commitment-warning {
-  color: var(--text-secondary);
-  margin-bottom: 1rem;
-  font-size: 0.875rem;
-  font-family: var(--font-mono);
-}
+  .chain-options,
+  .token-options {
+    grid-template-columns: repeat(2, 1fr);
+  }
 
-.commitment-value {
-  background: rgba(255, 255, 255, 0.6);
-  padding: 1rem;
-  font-family: var(--font-mono);
-  word-break: break-all;
-  margin-bottom: 1rem;
-  font-size: 0.875rem;
-  letter-spacing: 0.05em;
-  border: 1px solid rgba(16, 185, 129, 0.2);
-  color: var(--color-background);
-}
+  .amount-options {
+    grid-template-columns: repeat(2, 1fr);
+  }
 
-.copy-btn {
-  width: 100%;
-  background: var(--success-color);
-  border-color: var(--success-color);
-  color: white;
-}
+  .address-display {
+    flex-direction: column;
+  }
 
-.copy-btn:hover {
-  background: var(--success-color);
-  border-color: var(--success-color);
-  opacity: 0.9;
-  transform: translateY(-2px);
-}
-
-.info-section h3 {
-  margin-bottom: 1rem;
-  color: var(--color-background);
-  font-family: var(--font-mono);
-  font-size: 1rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
-
-.info-section ul {
-  list-style: none;
-  padding: 0;
-}
-
-.info-section li {
-  padding: 0.75rem 0;
-  padding-left: 2rem;
-  position: relative;
-  font-family: var(--font-mono);
-  font-size: 0.875rem;
-  color: var(--color-background);
-  opacity: 0.7;
-  border-bottom: 1px solid rgba(20, 24, 30, 0.1);
-}
-
-.info-section li:last-child {
-  border-bottom: none;
-}
-
-.info-section li::before {
-  content: "›";
-  position: absolute;
-  left: 0;
-  color: var(--primary-color);
-  font-size: 1.5rem;
-  line-height: 1;
-}
-
-/* Chain address section */
-.chain-address-section {
-  margin-bottom: 2rem;
-  padding: 1rem;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.chain-address-section h3 {
-  margin: 0 0 1rem 0;
-  font-size: 1.1rem;
-  color: var(--color-background);
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
-
-.address-display {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  margin-bottom: 0.5rem;
-}
-
-.address-display code {
-  flex: 1;
-  padding: 0.75rem;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  border-radius: 4px;
-  font-family: var(--font-mono);
-  font-size: 0.875rem;
-  color: var(--color-background);
-  overflow-x: auto;
-}
-
-.chain-notice {
-  margin: 0;
-  font-size: 0.875rem;
-  color: var(--color-background);
-  opacity: 0.7;
-  font-style: italic;
-  font-family: var(--font-mono);
+  .action-buttons {
+    flex-direction: column;
+  }
 }

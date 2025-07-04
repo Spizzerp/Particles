@@ -5,56 +5,36 @@
       "type": "motoko",
       "main": "src/canisters/DepositManager.mo"
     },
-    "particle_router": {
-      "type": "motoko",
-      "main": "src/canisters/ParticleRouter.mo"
-    },
-    "pattern_breaker": {
-      "type": "motoko",
-      "main": "src/canisters/PatternBreaker.mo"
-    },
     "withdrawal_processor": {
       "type": "motoko",
       "main": "src/canisters/WithdrawalProcessor.mo"
     },
-    "crypto_components": {
+    "ethereum_adapter": {
       "type": "motoko",
-      "main": "src/canisters/CryptoComponents.mo"
-    },
-    "crypto_components_v2": {
-      "type": "motoko",
-      "main": "src/canisters/CryptoComponentsV2.mo",
-      "dependencies": ["hash_canister"]
-    },
-    "chain_fusion_manager": {
-      "type": "motoko",
-      "main": "src/canisters/ChainFusionManager.mo"
-    },
-    "frontend": {
-      "type": "assets",
-      "source": ["dist"],
-      "dependencies": [
-        "deposit_manager",
-        "particle_router",
-        "pattern_breaker",
-        "withdrawal_processor",
-        "crypto_components",
-        "chain_fusion_manager"
-      ]
-    },
-    "internet_identity": {
-      "type": "pull",
-      "id": "rdmx6-jaaaa-aaaaa-aaadq-cai"
+      "main": "src/canisters/EthereumAdapter.mo"
     },
     "plonk_verifier": {
       "type": "rust",
       "candid": "src/canisters/plonk_verifier_on_icp_backend/plonk_verifier_on_icp_backend.did",
       "package": "plonk_verifier_on_icp_backend"
     },
-    "hash_canister": {
+    "keccak256": {
       "type": "rust",
-      "candid": "src/canisters/hash_canister/src/hash_canister.did",
-      "package": "hash_canister"
+      "candid": "src/canisters/keccak256/keccak256.did",
+      "package": "keccak256"
+    },
+    "eth_transaction_handler": {
+      "type": "rust",
+      "candid": "src/canisters/eth_transaction_handler/eth_transaction_handler.did",
+      "package": "eth_transaction_handler"
+    },
+    "frontend": {
+      "type": "assets",
+      "source": ["dist"]
+    },
+    "internet_identity": {
+      "type": "pull",
+      "id": "rdmx6-jaaaa-aaaaa-aaadq-cai"
     }
   },
   "defaults": {

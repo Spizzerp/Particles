@@ -33,12 +33,37 @@ export interface Withdrawal {
   timestamp: bigint;
 }
 
-// ZK Proof type
+// ZK Proof type (legacy format)
 export interface ZKProof {
   a: [string, string];
   b: [[string, string], [string, string]];
   c: [string, string];
   publicSignals: string[];
+}
+
+// PLONK Proof type
+export interface PlonkProof {
+  lro: [string, string][];
+  z: [string, string];
+  h1: [string, string];
+  h2: [string, string];
+  wire_values_at_z: string[];
+  wire_values_at_z_omega: string[];
+}
+
+// Witness data for proof generation
+export interface WitnessData {
+  Secret: string;
+  Nullifier: string;
+  Amount: string;
+  MerklePath: string[];
+  MerkleIndices: string[];
+  MerkleRoot: string;
+  NullifierHash: string;
+  Recipient: string;
+  Relayer: string;
+  Fee: string;
+  Refund: string;
 }
 
 // Route type
@@ -73,41 +98,12 @@ export interface DepositManagerService {
   getUserDeposits: (user: Principal) => Promise<Deposit[]>;
   getTotalDeposits: () => Promise<bigint>;
   getMerkleRoot: (level?: bigint) => Promise<MerkleRoot | undefined>;
-  getMerkleProof: (commitment: CommitmentHash) => Promise<string[]>;
+  getCurrentMerkleRoot: () => Promise<MerkleRoot | undefined>;
+  getLeafCount: () => Promise<bigint>;
+  getMerkleProof: (depositId: bigint) => Promise<Result<string[], string>>;
   updateMerkleTree: (level: bigint, root: MerkleRoot) => Promise<Result<null, string>>;
 }
 
-export interface ParticleRouterService {
-  createRoute: (
-    sourceChain: ChainId,
-    destChain: ChainId,
-    tokenId: TokenId,
-    baseFee: Amount
-  ) => Promise<Result<string, string>>;
-  findOptimalRoute: (
-    sourceChain: ChainId,
-    destChain: ChainId,
-    tokenId: TokenId,
-    amount: Amount
-  ) => Promise<Result<Route, string>>;
-  addLiquidity: (
-    chainId: ChainId,
-    tokenId: TokenId,
-    amount: Amount
-  ) => Promise<Result<null, string>>;
-  removeLiquidity: (
-    chainId: ChainId,
-    tokenId: TokenId,
-    amount: Amount
-  ) => Promise<Result<null, string>>;
-  getRoute: (
-    sourceChain: ChainId,
-    destChain: ChainId,
-    tokenId: TokenId
-  ) => Promise<Route | undefined>;
-  getLiquidity: (chainId: ChainId, tokenId: TokenId) => Promise<bigint>;
-  getAvailableRoutes: (sourceChain: ChainId) => Promise<Route[]>;
-}
 
 export interface WithdrawalProcessorService {
   initiateWithdrawal: (
@@ -117,7 +113,7 @@ export interface WithdrawalProcessorService {
     tokenId: TokenId,
     chainId: ChainId,
     merkleRoot: MerkleRoot,
-    proof: ZKProof
+    proof: PlonkProof
   ) => Promise<Result<bigint, string>>;
   processWithdrawal: (withdrawalId: bigint) => Promise<Result<null, string>>;
   batchProcessWithdrawals: (withdrawalIds: bigint[]) => Promise<Result<bigint[], string>>;
@@ -149,35 +145,3 @@ export interface PatternBreakerService {
   getMostCommonPatterns: () => Promise<[string, bigint][]>;
 }
 
-export interface CryptoComponentsService {
-  generateCommitment: (
-    secret: string,
-    nullifier: string,
-    amount: bigint
-  ) => Promise<Result<CommitmentHash, string>>;
-  generateNullifier: (
-    secret: string,
-    leafIndex: bigint
-  ) => Promise<Result<NullifierHash, string>>;
-  addLeaf: (commitment: CommitmentHash) => Promise<Result<bigint, string>>;
-  getMerkleProof: (leafIndex: bigint) => Promise<Result<CommitmentHash[], string>>;
-  verifyMerkleProof: (
-    leaf: CommitmentHash,
-    proof: CommitmentHash[],
-    root: MerkleRoot,
-    leafIndex: bigint
-  ) => Promise<boolean>;
-  generateZKProof: (
-    secret: string,
-    nullifier: string,
-    recipient: string,
-    amount: bigint,
-    merkleRoot: MerkleRoot,
-    merkleProof: CommitmentHash[],
-    leafIndex: bigint
-  ) => Promise<Result<ZKProof, string>>;
-  getCurrentMerkleRoot: () => Promise<MerkleRoot | undefined>;
-  getMerkleRootAtLevel: (level: bigint) => Promise<MerkleRoot | undefined>;
-  getTreeDepth: () => Promise<bigint>;
-  getLeafCount: () => Promise<bigint>;
-}

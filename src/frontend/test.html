@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Frontend Test</title>
+</head>
+<body>
+    <h1>Testing Frontend Structure</h1>
+    <div id="root"></div>
+    <script>
+        // Check if the root element exists
+        const root = document.getElementById('root');
+        if (root) {
+            root.innerHTML = '<h2>Root element found - React should mount here</h2>';
+        } else {
+            document.body.innerHTML += '<h2 style="color: red;">ERROR: Root element not found!</h2>';
+        }
+        
+        // Log any errors
+        window.addEventListener('error', (e) => {
+            document.body.innerHTML += `<p style="color: red;">Error: ${e.message}</p>`;
+        });
+    </script>
+</body>
+</html>

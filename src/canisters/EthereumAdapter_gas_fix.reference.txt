@@ -1,0 +1,164 @@
+import Hex "./utils/Hex";
+import Blob "mo:base/Blob";
+import Debug "mo:base/Debug";
+import Text "mo:base/Text";
+import Nat "mo:base/Nat";
+import Iter "mo:base/Iter";
+import Array "mo:base/Array";
+import Principal "mo:base/Principal";
+import Result "mo:base/Result";
+import Time "mo:base/Time";
+import Error "mo:base/Error";
+
+module {
+    // Type definitions needed for the function
+    private type DepositInfo = {
+        commitment: Text;
+        amount: Nat;
+        timestamp: Int;
+        userId: Principal;
+        processed: Bool;
+    };
+
+    private type EthereumTransaction = {
+        to: Text;
+        value: Nat;
+        data: Blob;
+        nonce: Nat;
+        gasPrice: Nat;
+        gasLimit: Nat;
+        chainId: Nat;
+    };
+
+    // Fix for the forwardFundsToPool function to account for gas costs
+
+    // Forward funds from deposit address to pool contract
+    private func forwardFundsToPool(depositAddress: Text, info: DepositInfo) : async Result.Result<Text, Text> {
+        try {
+            // Get nonce for the deposit address
+            let nonceResult = await makeRpcCall(
+                "eth_getTransactionCount", 
+                "[\"" # depositAddress # "\",\"latest\"]"
+            );
+            
+            let addressNonce = switch (nonceResult) {
+                case (#ok(res)) { hexToNat(extractHexFromJson(res)) };
+                case (#err(e)) { return #err("Failed to get nonce: " # e) };
+            };
+            
+            // Get current gas price
+            let gasPriceResult = await makeRpcCall("eth_gasPrice", "[]");
+            let gasPrice = switch (gasPriceResult) {
+                case (#ok(res)) { 
+                    let price = hexToNat(extractHexFromJson(res));
+                    // Add 10% buffer for faster inclusion
+                    price + (price / 10)
+                };
+                case (#err(_)) { 30_000_000_000 }; // 30 gwei fallback
+            };
+            
+            // Calculate gas cost for the transaction
+            let gasLimit : Nat = 150000; // Higher limit for contract interaction
+            let totalGasCost = gasPrice * gasLimit;
+            
+            // IMPORTANT: Check if we have enough balance to cover gas
+            let balanceResult = await makeRpcCall(
+                "eth_getBalance", 
+                "[\"" # depositAddress # "\",\"latest\"]"
+            );
+            
+            let currentBalance = switch (balanceResult) {
+                case (#ok(res)) { hexToNat(extractHexFromJson(res)) };
+                case (#err(e)) { return #err("Failed to get balance: " # e) };
+            };
+            
+            Debug.print("Deposit address balance: " # Nat.toText(currentBalance));
+            Debug.print("Required gas cost: " # Nat.toText(totalGasCost));
+            Debug.print("Original deposit amount: " # Nat.toText(info.amount));
+            
+            // Ensure we have enough to cover gas
+            if (currentBalance < totalGasCost) {
+                return #err("Insufficient balance for gas. Have: " # Nat.toText(currentBalance) # 
+                           ", need at least: " # Nat.toText(totalGasCost));
+            };
+            
+            // Calculate the actual amount to forward (balance minus gas)
+            let amountToForward = currentBalance - totalGasCost;
+            
+            // For the contract call, we still need to match the expected deposit amount
+            // So we check if the forwarded amount is close enough
+            if (amountToForward < info.amount * 95 / 100) { // Less than 95% of expected
+                return #err("Insufficient funds after gas. Can only forward: " # 
+                           Nat.toText(amountToForward) # " but need: " # Nat.toText(info.amount));
+            };
+            
+            // Build deposit call data
+            // deposit(bytes32) function signature
+            let methodId = "b214faa5";
+            let commitmentHex = Text.trimStart(info.commitment, #text "0x");
+            
+            // Ensure commitment is properly padded to 32 bytes (64 hex chars)
+            let paddedCommitment = if (Text.size(commitmentHex) < 64) {
+                // Pad with leading zeros
+                let padding = Text.fromIter(Iter.fromArray(Array.tabulate(64 - Text.size(commitmentHex), func(_: Nat) : Char { '0' })));
+                padding # commitmentHex
+            } else {
+                commitmentHex
+            };
+            
+            let callData = methodId # paddedCommitment;
+            
+            // Build transaction with reduced amount to account for gas
+            let tx : EthereumTransaction = {
+                to = depositContractAddress;
+                value = amountToForward; // This is balance - gas cost
+                data = switch (Hex.decode(callData)) {
+                    case (#ok(bytes)) { Blob.fromArray(bytes) };
+                    case (#err(_)) { return #err("Failed to encode call data") };
+                };
+                nonce = addressNonce;
+                gasPrice = gasPrice;
+                gasLimit = gasLimit;
+                chainId = 11155111; // Sepolia
+            };
+            
+            Debug.print("Forwarding " # Nat.toText(amountToForward) # " wei to pool contract");
+            
+            // Sign transaction with the deposit address's derived key
+            let derivationPath = [Principal.toBlob(info.userId)];
+            let signedTx = await signTransactionWithPath(tx, derivationPath);
+            
+            // Submit transaction
+            let submitResult = await makeRpcCall(
+                "eth_sendRawTransaction",
+                "[\"" # signedTx # "\"]"
+            );
+            
+            switch (submitResult) {
+                case (#ok(res)) {
+                    let txHash = extractHexFromJson(res);
+                    Debug.print("Forwarded deposit with tx: " # txHash);
+                    
+                    // Add commitment to Merkle tree with the original amount
+                    let leafResult = await cryptoComponents.addLeaf(info.commitment);
+                    switch (leafResult) {
+                        case (#ok(leafIndex)) {
+                            Debug.print("Added to Merkle tree at index: " # Nat.toText(leafIndex));
+                        };
+                        case (#err(e)) {
+                            Debug.print("Warning: Failed to add to Merkle tree: " # e);
+                            // Don't fail the transaction, just log the error
+                        };
+                    };
+                    
+                    #ok(txHash)
+                };
+                case (#err(e)) {
+                    #err("Failed to submit transaction: " # e)
+                };
+            };
+        } catch (e) {
+            #err("Exception during fund forwarding: " # Error.message(e))
+        }
+    };
+}

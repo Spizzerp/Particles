@@ -62,7 +62,7 @@ const WithdrawPage: React.FC = () => {
 
   const handleWithdraw = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!depositData || !recipient || !isAuthenticated) return;
+    if (!depositData || !recipient) return;
 
     setIsProcessing(true);
     setWithdrawalStatus('Validating deposit data...');
@@ -78,7 +78,7 @@ const WithdrawPage: React.FC = () => {
       
       // Get deposit info from canister
       setWithdrawalStatus('Fetching deposit information...');
-      const depositManager = await getDepositManager(identity || undefined);
+      const depositManager = await getDepositManager();
       const depositId = BigInt(depositData.depositId);
       const depositInfo = await depositManager.getDeposit(depositId);
       
@@ -88,14 +88,23 @@ const WithdrawPage: React.FC = () => {
 
       const deposit = depositInfo;
       
-      // Get merkle root and proof
+      // Get merkle root and proof from DepositManager
       setWithdrawalStatus('Generating merkle proof...');
-      const merkleRoot = await depositManager.getMerkleRoot();
-      const merkleProof = await depositManager.getMerkleProof(depositData.commitment);
+      const merkleRoot = await depositManager.getCurrentMerkleRoot();
       
-      if (!merkleProof || merkleProof.length === 0) {
-        throw new Error('Could not generate merkle proof');
+      if (!merkleRoot) {
+        throw new Error('No merkle root found');
       }
+      
+      // Use depositId as leafIndex (simplified approach)
+      const leafIndex = Number(depositData.depositId);
+      
+      const merkleProofResult = await depositManager.getMerkleProof(BigInt(leafIndex));
+      if ('err' in merkleProofResult) {
+        throw new Error('Could not generate merkle proof: ' + merkleProofResult.err);
+      }
+      
+      const merkleProof = merkleProofResult.ok;
 
       // Generate ZK proof
       setWithdrawalStatus('Generating zero-knowledge proof...');
@@ -106,8 +115,9 @@ const WithdrawPage: React.FC = () => {
         withdrawalProof = await generateWithdrawalProof(
           depositData,
           formattedRecipient,
-          merkleRoot || '',
-          merkleProof
+          merkleRoot,
+          merkleProof,
+          leafIndex // Pass the leaf index we found
         );
         
         setProofStatus('verifying');
@@ -121,22 +131,21 @@ const WithdrawPage: React.FC = () => {
 
       // Submit withdrawal
       setWithdrawalStatus('Submitting withdrawal transaction...');
-      const withdrawalProcessor = await getWithdrawalProcessor(identity || undefined);
+      const withdrawalProcessor = await getWithdrawalProcessor();
       
-      // Create ZK proof object matching the expected format
-      const zkProof = {
-        a: [withdrawalProof.proof.a.slice(0, 32), withdrawalProof.proof.a.slice(32)] as [string, string],
-        b: [
-          [withdrawalProof.proof.b.slice(0, 32), withdrawalProof.proof.b.slice(32)] as [string, string],
-          [withdrawalProof.proof.b.slice(0, 32), withdrawalProof.proof.b.slice(32)] as [string, string]
-        ] as [[string, string], [string, string]],
-        c: [withdrawalProof.proof.c.slice(0, 32), withdrawalProof.proof.c.slice(32)] as [string, string],
-        publicSignals: [
-          withdrawalProof.nullifier,
-          withdrawalProof.merkleRoot,
-          formattedRecipient,
-          withdrawalProof.amount
-        ]
+      // Create PLONK proof object matching the expected format
+      // The withdrawalProof must contain a valid PLONK proof from the client-side prover
+      if (!withdrawalProof.proof || !withdrawalProof.proof.lro) {
+        throw new Error('Invalid proof generated');
+      }
+      
+      const plonkProof = {
+        lro: withdrawalProof.proof.lro,
+        z: withdrawalProof.proof.z,
+        h1: withdrawalProof.proof.h1,
+        h2: withdrawalProof.proof.h2,
+        wire_values_at_z: withdrawalProof.proof.wire_values_at_z,
+        wire_values_at_z_omega: withdrawalProof.proof.wire_values_at_z_omega
       };
       
       const result = await withdrawalProcessor.initiateWithdrawal(
@@ -144,9 +153,9 @@ const WithdrawPage: React.FC = () => {
         formattedRecipient,
         BigInt(withdrawalProof.amount),
         depositData.token,
-        BigInt(withdrawalProof.chainId),
-        withdrawalProof.merkleRoot,
-        zkProof
+        BigInt(withdrawalProof.chainId || selectedChain),
+        merkleRoot,
+        plonkProof
       );
 
       if ('ok' in result) {
@@ -199,27 +208,6 @@ const WithdrawPage: React.FC = () => {
                 <p>Amount: {formatAmount(depositData.amount, selectedChain === 'BTC' ? 0 : selectedChain === 'ICP' ? 2 : 1)} {depositData.token}</p>
                 <p>Original Chain: {depositData.chain}</p>
               </div>
-            )}
-            {!depositData && (
-              <button
-                type="button"
-                className="generate-test-btn"
-                onClick={() => {
-                  const testData = {
-                    commitment: '0x' + Array(64).fill('a').join(''),
-                    depositId: Math.floor(Math.random() * 1000).toString(),
-                    secret: '0x' + Array(64).fill('b').join(''),
-                    nullifier: '0x' + Array(64).fill('c').join(''),
-                    amount: '1000000',
-                    token: 'ICP',
-                    chain: 'ICP'
-                  };
-                  setCommitmentInput(JSON.stringify(testData, null, 2));
-                  handleCommitmentChange(JSON.stringify(testData, null, 2));
-                }}
-              >
-                Generate Test Data
-              </button>
             )}
           </div>
 

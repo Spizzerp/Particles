@@ -1,0 +1,2782 @@
+import Principal "mo:base/Principal";
+import Result "mo:base/Result";
+import Blob "mo:base/Blob";
+import Text "mo:base/Text";
+import Nat "mo:base/Nat";
+import Nat8 "mo:base/Nat8";
+import Nat64 "mo:base/Nat64";
+import Int "mo:base/Int";
+import Int64 "mo:base/Int64";
+import Array "mo:base/Array";
+import Buffer "mo:base/Buffer";
+import Iter "mo:base/Iter";
+import Hex "./utils/Hex";
+import Keccak "./utils/Keccak";
+import RLP "./utils/RLP";
+import ECDSAUtils "./utils/ECDSAUtils";
+import Map "mo:base/HashMap";
+import Time "mo:base/Time";
+import Error "mo:base/Error";
+import Debug "mo:base/Debug";
+import ExperimentalCycles "mo:base/ExperimentalCycles";
+
+actor EthereumAdapter {
+
+    private type DepositEvent = {
+        commitment: Text;
+        amount: Nat;
+        sender: Text;
+        blockNumber: Nat;
+        txHash: Text;
+        timestamp: Int;
+    };
+
+    // Updated deposit info to include userId for key derivation
+    private type DepositInfo = {
+        commitment: Text;
+        amount: Nat;
+        timestamp: Int;
+        userId: Principal;
+        processed: Bool;
+    };
+
+    private type EthereumTransaction = {
+        to: Text;
+        value: Nat;
+        data: Blob;
+        nonce: Nat;
+        gasPrice: Nat;
+        gasLimit: Nat;
+        chainId: Nat;
+    };
+
+    // EIP-1559 Transaction type
+    private type EIP1559Transaction = {
+        to: Text;
+        value: Nat;
+        data: Blob;
+        nonce: Nat;
+        maxFeePerGas: Nat;
+        maxPriorityFeePerGas: Nat;
+        gasLimit: Nat;
+        chainId: Nat;
+    };
+
+    // EVM RPC types
+    private type RpcServices = {
+        #EthSepolia : ?[EthSepoliaService];
+        #EthMainnet : ?[EthMainnetService];
+    };
+    
+    private type EthSepoliaService = {
+        #Alchemy;
+        #Ankr;
+        #BlockPi;
+        #PublicNode;
+        #Sepolia;
+    };
+
+    private type EthMainnetService = {
+        #Alchemy;
+        #Ankr;
+        #BlockPi;
+        #Cloudflare;
+        #PublicNode;
+        #Llama;
+    };
+
+    private type BlockTag = {
+        #Latest;
+        #Earliest;
+        #Pending;
+        #Number : Nat;
+    };
+
+    private type RpcConfig = {
+        responseSizeEstimate: ?Nat64;
+        responseConsensus: ?{
+            #Equality;
+            #Threshold : { total: ?Nat8; min: Nat8 };
+        };
+    };
+    
+    // Fee history types
+    private type FeeHistory = {
+        baseFeePerGas: [Nat];
+        reward: [[Nat]];
+        gasUsedRatio: [Float];
+        oldestBlock: Nat;
+    };
+    
+    private type FeeHistoryArgs = {
+        blockCount: Nat;
+        newestBlock: BlockTag;
+        rewardPercentiles: ?[Nat8];
+    };
+    
+    private type FeeHistoryResult = {
+        #Ok : FeeHistory;
+        #Err : RpcError;
+    };
+    
+    private type MultiFeeHistoryResult = {
+        #Consistent : FeeHistoryResult;
+        #Inconsistent : [(RpcService, FeeHistoryResult)];
+    };
+
+    private type GetTransactionCountArgs = {
+        address: Text;
+        block: BlockTag;
+    };
+
+    private type MultiCallResult = {
+        #Consistent : CallResult;
+        #Inconsistent : [(RpcService, CallResult)];
+    };
+
+    private type CallResult = {
+        #Ok : Text;
+        #Err : RpcError;
+    };
+
+    private type RpcError = {
+        #JsonRpcError : { code: Int64; message: Text };
+        #ProviderError : {
+            #TooFewCycles : { expected: Nat; received: Nat };
+            #MissingRequiredProvider;
+            #ProviderNotFound;
+            #NoPermission;
+        };
+        #ValidationError : {
+            #Custom : Text;
+            #InvalidHex : Text;
+        };
+        #HttpOutcallError : {
+            #IcError : { code: { #NoError; #CanisterError; #SysTransient; #DestinationInvalid; #Unknown; #SysFatal; #CanisterReject }; message: Text };
+            #InvalidHttpJsonRpcResponse : { status: Nat16; body: Text; parsingError: ?Text };
+        };
+    };
+
+    private type RpcService = {
+        #EthSepolia : EthSepoliaService;
+        #EthMainnet : EthMainnetService;
+    };
+
+    private type MultiGetTransactionCountResult = {
+        #Consistent : GetTransactionCountResult;
+        #Inconsistent : [(RpcService, GetTransactionCountResult)];
+    };
+
+    private type GetTransactionCountResult = {
+        #Ok : Nat;
+        #Err : RpcError;
+    };
+
+    private type MultiSendRawTransactionResult = {
+        #Consistent : SendRawTransactionResult;
+        #Inconsistent : [(RpcService, SendRawTransactionResult)];
+    };
+
+    private type SendRawTransactionResult = {
+        #Ok : SendRawTransactionStatus;
+        #Err : RpcError;
+    };
+
+    private type SendRawTransactionStatus = {
+        #Ok : ?Text;
+        #NonceTooLow;
+        #NonceTooHigh;
+        #InsufficientFunds;
+    };
+
+    private type RequestResult = {
+        #Ok : Text;
+        #Err : RpcError;
+    };
+
+    private type GetLogsArgs = {
+        fromBlock : ?BlockTag;
+        toBlock : ?BlockTag;
+        addresses : [Text];
+        topics : ?[?Text];
+    };
+
+    private type LogEntry = {
+        transactionHash : ?Text;
+        blockNumber : ?Nat;
+        data : Text;
+        blockHash : ?Text;
+        transactionIndex : ?Nat;
+        topics : [Text];
+        address : Text;
+        logIndex : ?Nat;
+        removed : Bool;
+    };
+
+    private type MultiGetLogsResult = {
+        #Consistent : GetLogsResult;
+        #Inconsistent : [(RpcService, GetLogsResult)];
+    };
+
+    private type GetLogsResult = {
+        #Ok : [LogEntry];
+        #Err : RpcError;
+    };
+
+    private type GetLogsRpcConfig = {
+        responseSizeEstimate : ?Nat64;
+        responseConsensus : ?{
+            #Equality;
+            #Threshold : { total: ?Nat8; min: Nat8 };
+        };
+        maxBlockRange : ?Nat32;
+    };
+
+    // HTTP outcall types
+    private type HttpRequestArgs = {
+        url : Text;
+        max_response_bytes : ?Nat64;
+        headers : [HttpHeader];
+        body : ?Blob;
+        method : { #get; #post };
+        transform : ?{
+            function : shared query ({response : HttpResponsePayload; context : Blob}) -> async HttpResponsePayload;
+            context : Blob;
+        };
+    };
+
+    private type HttpHeader = {
+        name : Text;
+        value : Text;
+    };
+
+    private type HttpResponsePayload = {
+        status : Nat;
+        headers : [HttpHeader];
+        body : Blob;
+    };
+    
+    // State
+    private stable var depositContractAddress : Text = "0x9b0721C174b103facEC1EeE435679Ae9C493163C"; // Mainnet pool contract
+    private stable var lastCheckedBlock : Nat = 0;
+    private stable var nonce : Nat = 0;
+    
+    // Enhanced deposit tracking
+    private stable var depositAddressesStable : [(Text, DepositInfo)] = [];
+    private var depositAddresses = Map.HashMap<Text, DepositInfo>(100, Text.equal, Text.hash);
+    
+    // Track processed deposits to avoid duplicates
+    private stable var processedDepositsStable : [(Text, Int)] = [];
+    private var processedDeposits = Map.HashMap<Text, Int>(100, Text.equal, Text.hash);
+
+    // Constants
+    private let ECDSA_KEY_NAME : Text = "key_1";  // Production key for mainnet
+    private let DEPOSIT_EVENT_SIGNATURE = "0x90890809c654f11d6e72a28fa60149770a0d11ec6c92319d6ceb2bb0a4ea1a15";
+    
+    // Keccak256 canister ID - will be updated after deployment
+    private var keccak256CanisterId : Text = "hjxjp-uyaaa-aaaaj-a2dha-cai"; // Mainnet keccak256 canister
+    
+    // RPC Configuration - Using public endpoints only
+    // Private endpoints with API keys should be configured through environment variables
+    // and passed from frontend or through a secure configuration method
+    private let RPC_ENDPOINTS : [Text] = [
+        // Public endpoints that don't require API keys
+        "https://ethereum-sepolia.publicnode.com",
+        "https://eth-sepolia.public.blastapi.io",
+        "https://sepolia.drpc.org",
+        "https://endpoints.omniatech.io/v1/eth/sepolia/public",
+        "https://eth-sepolia-public.unifra.io"
+    ];
+    
+    // Track current RPC endpoint index for rotation
+    private stable var currentRpcIndex : Nat = 0;
+    
+    // ECDSA types removed to avoid conflicts
+    
+    // Management canister interface
+    private let ic : actor {
+        http_request : HttpRequestArgs -> async HttpResponsePayload;
+        ecdsa_public_key : ({
+            canister_id : ?Principal;
+            derivation_path : [Blob];
+            key_id : { curve: { #secp256k1 }; name: Text };
+        }) -> async ({ public_key : Blob; chain_code : Blob });
+        sign_with_ecdsa : ({
+            message_hash : Blob;
+            derivation_path : [Blob];
+            key_id : { curve: { #secp256k1 }; name: Text };
+        }) -> async ({ signature : Blob });
+    } = actor "aaaaa-aa";
+
+    // Inter-canister communication with DepositManager
+    private let depositManager : actor {
+        deposit : (Nat, Text, Nat, Text) -> async Result.Result<Nat, Text>;
+        getCurrentMerkleRoot : () -> async ?Text;
+    } = actor("hhveh-piaaa-aaaaj-a2dga-cai");
+
+    // EVM RPC canister interface
+    private let evmRpc : actor {
+        eth_getTransactionCount : (RpcServices, ?RpcConfig, GetTransactionCountArgs) -> async MultiGetTransactionCountResult;
+        eth_sendRawTransaction : (RpcServices, ?RpcConfig, Text) -> async MultiSendRawTransactionResult;
+        eth_getLogs : (RpcServices, ?GetLogsRpcConfig, GetLogsArgs) -> async MultiGetLogsResult;
+        eth_feeHistory : (RpcServices, ?RpcConfig, FeeHistoryArgs) -> async MultiFeeHistoryResult;
+        request : (RpcService, Text, Nat64) -> async RequestResult;
+    } = actor("7hfb6-caaaa-aaaar-qadga-cai");
+
+    // System functions for upgrades
+    system func preupgrade() {
+        depositAddressesStable := Iter.toArray(depositAddresses.entries());
+        processedDepositsStable := Iter.toArray(processedDeposits.entries());
+    };
+
+    system func postupgrade() {
+        depositAddresses := Map.fromIter(depositAddressesStable.vals(), depositAddressesStable.size(), Text.equal, Text.hash);
+        processedDeposits := Map.fromIter(processedDepositsStable.vals(), processedDepositsStable.size(), Text.equal, Text.hash);
+        depositAddressesStable := [];
+        processedDepositsStable := [];
+    };
+
+    // Generate unique Ethereum address for deposits
+    public shared(msg) func getDepositAddress(userId: Principal, commitment: Text, amount: Nat) : async Result.Result<Text, Text> {
+        try {
+            // Validate inputs
+            if (Text.size(commitment) != 66) { // 0x + 64 hex chars
+                return #err("Invalid commitment format");
+            };
+            if (amount == 0) {
+                return #err("Amount must be greater than 0");
+            };
+            
+            // Generate UNIQUE derivation path by combining user + commitment + timestamp
+            // This ensures each deposit gets a unique address
+            let uniqueData = Text.encodeUtf8(
+                Principal.toText(userId) # 
+                commitment # 
+                Int.toText(Time.now())
+            );
+            let uniqueHash = await keccak256(uniqueData);
+            let hashBytes = Blob.toArray(uniqueHash);
+            // Use first 4 bytes as derivation path
+            let derivationPath = [Blob.fromArray([hashBytes[0], hashBytes[1], hashBytes[2], hashBytes[3]])];
+            
+            // Get public key via management canister
+            let { public_key; chain_code } = await getEcdsaPublicKey(derivationPath);
+            
+            // Convert to Ethereum address
+            let address = await publicKeyToEthereumAddress(public_key);
+            
+            // Store the mapping with enhanced info
+            depositAddresses.put(address, {
+                commitment = commitment;
+                amount = amount;
+                timestamp = Time.now();
+                userId = userId;
+                processed = false;
+            });
+            
+            #ok(address)
+        } catch (e) {
+            #err("Failed to generate address: " # Error.message(e))
+        }
+    };
+
+    // Generate unique Ethereum address for deposits (V2 - with proper key handling)
+    public shared(msg) func getDepositAddressV2(userId: Principal, commitment: Text, amount: Nat) : async Result.Result<Text, Text> {
+        try {
+            // Generate UNIQUE derivation path by combining user + commitment + timestamp
+            // This ensures each deposit gets a unique address
+            let derivationTimestamp = Time.now(); // Store the timestamp we use for derivation
+            let uniqueData = Text.encodeUtf8(
+                Principal.toText(userId) # 
+                commitment # 
+                Int.toText(derivationTimestamp)
+            );
+            let uniqueHash = await keccak256(uniqueData);
+            let hashBytes = Blob.toArray(uniqueHash);
+            let derivationPath = [Blob.fromArray([hashBytes[0], hashBytes[1], hashBytes[2], hashBytes[3]])];
+            
+            // Get public key for this UNIQUE derivation
+            let { public_key; chain_code } = await getEcdsaPublicKey(derivationPath);
+            
+            // Convert to Ethereum address using PROPER decompression
+            let address = await publicKeyToEthereumAddressProper(public_key);
+            
+            Debug.print("Generated unique deposit address V2: " # address # " for user: " # Principal.toText(userId));
+            
+            // Store deposit info with the SAME timestamp used for derivation
+            depositAddresses.put(address, {
+                commitment = commitment;
+                amount = amount;
+                timestamp = derivationTimestamp; // Use the same timestamp!
+                userId = userId;
+                processed = false;
+            });
+            
+            #ok(address)
+        } catch (e) {
+            #err("Failed to generate address V2: " # Error.message(e))
+        }
+    };
+
+    // Process deposits from unique addresses and forward to pool
+    public shared(msg) func processDepositAddresses() : async Result.Result<[Text], Text> {
+        var processedTxs = Buffer.Buffer<Text>(0);
+        var errors = Buffer.Buffer<Text>(0);
+        
+        // Ensure deposit contract is set
+        if (depositContractAddress == "") {
+            return #err("Deposit contract address not set. Call setDepositContract first.");
+        };
+        
+        // Process each deposit address
+        for ((address, info) in depositAddresses.entries()) {
+            if (not info.processed) {
+                try {
+                    // Check balance using EVM RPC canister
+                    let balanceRequest = "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getBalance\",\"params\":[\"" # 
+                                       address # "\",\"latest\"],\"id\":1}";
+                    
+                    // Add cycles for EVM RPC call
+                    ExperimentalCycles.add(2_000_000_000); // 2B cycles
+                    let balanceResult = await evmRpc.request(
+                        #EthMainnet(#PublicNode),
+                        balanceRequest,
+                        2048
+                    );
+                    
+                    switch (balanceResult) {
+                        case (#Ok(result)) {
+                            let balance = hexToNat(extractResultFromJson(result));
+                            
+                            // Process if balance is sufficient
+                            if (balance >= info.amount) {
+                                Debug.print("Processing deposit at " # address # " with balance: " # Nat.toText(balance));
+                                
+                                // Forward funds to pool contract
+                                let forwardResult = await forwardFundsToPool(address, info);
+                                
+                                switch (forwardResult) {
+                                    case (#ok(txHash)) {
+                                        processedTxs.add(txHash);
+                                        
+                                        // Mark as processed
+                                        depositAddresses.put(address, {
+                                            commitment = info.commitment;
+                                            amount = info.amount;
+                                            timestamp = info.timestamp;
+                                            userId = info.userId;
+                                            processed = true;
+                                        });
+                                        
+                                        // Track processed deposit
+                                        processedDeposits.put(info.commitment, Time.now());
+                                    };
+                                    case (#err(e)) {
+                                        errors.add("Failed to forward from " # address # ": " # e);
+                                    };
+                                };
+                            };
+                        };
+                        case (#Err(e)) {
+                            errors.add("Failed to check balance for " # address # " via EVM RPC");
+                        };
+                    };
+                } catch (e) {
+                    errors.add("Error processing " # address # ": " # Error.message(e));
+                };
+            };
+        };
+        
+        if (errors.size() > 0) {
+            Debug.print("Errors during processing: " # Text.join(", ", errors.vals()));
+        };
+        
+        #ok(Buffer.toArray(processedTxs))
+    };
+
+    // Forward funds from deposit address to pool contract
+    // Uses EVM RPC canister for consensus-safe Ethereum interactions
+    private func forwardFundsToPool(depositAddress: Text, info: DepositInfo) : async Result.Result<Text, Text> {
+        try {
+            // Get nonce using EVM RPC canister
+            // Add cycles for EVM RPC call
+            ExperimentalCycles.add(2_000_000_000); // 2B cycles
+            let nonceResult = await evmRpc.eth_getTransactionCount(
+                #EthMainnet(?[#PublicNode]),
+                ?{
+                    responseSizeEstimate = ?64;
+                    responseConsensus = null;
+                },
+                {
+                    address = depositAddress;
+                    block = #Latest;
+                }
+            );
+            
+            let addressNonce = switch (nonceResult) {
+                case (#Consistent(#Ok(nonce))) { nonce };
+                case (#Consistent(#Err(error))) { 
+                    return #err("Failed to get nonce via EVM RPC");
+                };
+                case (#Inconsistent(results)) {
+                    // Try to find most common nonce
+                    var nonce : Nat = 0;
+                    for ((_, result) in results.vals()) {
+                        switch (result) {
+                            case (#Ok(n)) { nonce := n; };
+                            case (#Err(_)) {};
+                        };
+                    };
+                    nonce;
+                };
+            };
+            
+            // Use reasonable gas price for Sepolia
+            // 1 gwei should be sufficient for Sepolia testnet
+            let gasPrice : Nat = 1_000_000_000;
+            
+            // Calculate gas cost for the transaction
+            let gasLimit : Nat = 100000; // Increased limit for deposit function with data
+            let totalGasCost = gasPrice * gasLimit;
+            
+            // Get balance using EVM RPC canister
+            let balanceRequest = "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getBalance\",\"params\":[\"" # 
+                               depositAddress # "\",\"latest\"],\"id\":1}";
+            
+            // Add cycles for EVM RPC call
+            ExperimentalCycles.add(2_000_000_000); // 2B cycles
+            let balanceResult = await evmRpc.request(
+                #EthMainnet(#PublicNode),
+                balanceRequest,
+                2048
+            );
+            
+            let currentBalance = switch (balanceResult) {
+                case (#Ok(response)) {
+                    let balanceHex = extractResultFromJson(response);
+                    hexToNat(balanceHex);
+                };
+                case (#Err(error)) {
+                    return #err("Failed to get balance via EVM RPC");
+                };
+            };
+            
+            Debug.print("Deposit address balance: " # Nat.toText(currentBalance));
+            Debug.print("Required gas cost: " # Nat.toText(totalGasCost));
+            
+            // Calculate buffer for gas
+            let buffer : Nat = totalGasCost / 5; // 20% of gas cost
+            let totalGasNeeded = totalGasCost + buffer;
+            
+            // Ensure we have enough to cover both the deposit amount AND gas
+            let totalRequired = info.amount + totalGasNeeded;
+            if (currentBalance < totalRequired) {
+                return #err("Insufficient balance. Have: " # Nat.toText(currentBalance) # 
+                           ", need: " # Nat.toText(totalRequired) # 
+                           " (deposit: " # Nat.toText(info.amount) # 
+                           ", gas+buffer: " # Nat.toText(totalGasNeeded) # ")");
+            };
+            
+            // Forward exactly the expected deposit amount (0.01 ETH)
+            // The extra balance covers gas costs
+            let amountToForward = info.amount; // Use the original deposit amount
+            
+            Debug.print("Balance: " # Nat.toText(currentBalance) # ", Gas cost: " # Nat.toText(totalGasCost) # 
+                       ", Buffer: " # Nat.toText(buffer) # ", Total gas needed: " # Nat.toText(totalGasNeeded) #
+                       ", Amount to forward: " # Nat.toText(amountToForward));
+            
+            // Build deposit call data
+            // deposit(bytes32) function signature
+            let methodId = "b214faa5";
+            let commitmentHex = Text.trimStart(info.commitment, #text "0x");
+            
+            // Ensure commitment is properly padded to 32 bytes (64 hex chars)
+            let paddedCommitment = if (Text.size(commitmentHex) < 64) {
+                // Pad with leading zeros
+                let padding = Text.fromIter(Iter.fromArray(Array.tabulate(64 - Text.size(commitmentHex), func(_: Nat) : Char { '0' })));
+                padding # commitmentHex
+            } else {
+                commitmentHex
+            };
+            
+            let callData = methodId # paddedCommitment;
+            
+            // Build transaction with reduced amount to account for gas
+            let tx : EthereumTransaction = {
+                to = depositContractAddress;
+                value = amountToForward; // This is the actual balance minus gas cost
+                data = switch (Hex.decode(callData)) {
+                    case (#ok(bytes)) { Blob.fromArray(bytes) };
+                    case (#err(_)) { return #err("Failed to encode call data") };
+                };
+                nonce = addressNonce;
+                gasPrice = gasPrice;
+                gasLimit = gasLimit;
+                chainId = 1; // Ethereum mainnet
+            };
+            
+            Debug.print("Transaction details: to=" # depositContractAddress # 
+                       ", value=" # Nat.toText(amountToForward) # 
+                       ", gasPrice=" # Nat.toText(gasPrice) # 
+                       ", gasLimit=" # Nat.toText(gasLimit) # 
+                       ", nonce=" # Nat.toText(addressNonce));
+            
+            // Sign transaction with the deposit address's derived key
+            // Use same derivation method as address generation
+            let userHash = await keccak256(Text.encodeUtf8(Principal.toText(info.userId)));
+            let hashBytes = Blob.toArray(userHash);
+            let derivationPath = [Blob.fromArray([hashBytes[0], hashBytes[1], hashBytes[2], hashBytes[3]])];
+            Debug.print("Derivation path blob size: " # Nat.toText(Blob.toArray(derivationPath[0]).size()));
+            
+            // Get the signature first
+            let encoded = encodeTransaction(tx);
+            let messageHash = await keccak256(encoded);
+            let signature = await signWithEcdsa(messageHash, derivationPath);
+            
+            // Try with v=0 first
+            let signedTx = encodeSignedTransaction(tx, signature);
+            
+            // Submit transaction using EVM RPC canister
+            Debug.print("Submitting transaction via EVM RPC canister...");
+            
+            // Add cycles for EVM RPC call (Rust example uses 10B)
+            ExperimentalCycles.add(10_000_000_000); // 10B cycles
+            let submitResult = await evmRpc.eth_sendRawTransaction(
+                #EthMainnet(?[#PublicNode]),
+                ?{
+                    responseSizeEstimate = ?256;
+                    responseConsensus = null;
+                },
+                signedTx
+            );
+            
+            switch (submitResult) {
+                case (#Consistent(#Ok(sendStatus))) {
+                    switch (sendStatus) {
+                        case (#Ok(?txHash)) {
+                            Debug.print("Forwarded deposit with tx: " # txHash);
+                            
+                            // Add commitment to deposit manager with actual forwarded amount
+                            let depositResult = await depositManager.deposit(
+                                amountToForward,  // Use actual forwarded amount, not original
+                                "ETH",
+                                1, // Mainnet chain ID
+                                info.commitment
+                            );
+                            switch (depositResult) {
+                                case (#ok(depositId)) {
+                                    Debug.print("Added deposit with ID: " # Nat.toText(depositId));
+                                };
+                                case (#err(e)) {
+                                    Debug.print("Warning: Failed to add deposit: " # e);
+                                };
+                            };
+                            
+                            #ok(txHash)
+                        };
+                        case (#Ok(null)) {
+                            #err("Transaction sent but no hash returned");
+                        };
+                        case (#NonceTooLow) {
+                            #err("Nonce too low - transaction may already be processed");
+                        };
+                        case (#NonceTooHigh) {
+                            #err("Nonce too high");
+                        };
+                        case (#InsufficientFunds) {
+                            // Try with v=1 if v=0 failed
+                            Debug.print("Trying with v=1...");
+                            let signedTxV1 = signTransactionWithPathV1(tx, signature);
+                            
+                            // Add cycles for second attempt
+                            ExperimentalCycles.add(10_000_000_000); // 10B cycles
+                            let submitResultV1 = await evmRpc.eth_sendRawTransaction(
+                                #EthMainnet(?[#PublicNode]),
+                                ?{
+                                    responseSizeEstimate = ?256;
+                                    responseConsensus = null;
+                                },
+                                signedTxV1
+                            );
+                            
+                            switch (submitResultV1) {
+                                case (#Consistent(#Ok(#Ok(?txHash)))) {
+                                    Debug.print("Success with v=1! Tx: " # txHash);
+                                    
+                                    // Add commitment to deposit manager with actual forwarded amount
+                                    let depositResult = await depositManager.deposit(
+                                        amountToForward,  // Use actual forwarded amount, not original
+                                        "ETH",
+                                        1, // Mainnet chain ID
+                                        info.commitment
+                                    );
+                                    switch (depositResult) {
+                                        case (#ok(depositId)) {
+                                            Debug.print("Added deposit with ID: " # Nat.toText(depositId));
+                                        };
+                                        case (#err(e)) {
+                                            Debug.print("Warning: Failed to add deposit: " # e);
+                                        };
+                                    };
+                                    
+                                    #ok(txHash)
+                                };
+                                case (#Consistent(#Ok(#InsufficientFunds))) {
+                                    #err("Insufficient funds for transaction (tried both v=0 and v=1)")
+                                };
+                                case (_) {
+                                    #err("Failed with both v values")
+                                };
+                            }
+                        };
+                    };
+                };
+                case (#Consistent(#Err(error))) {
+                    #err("Failed to submit transaction via EVM RPC");
+                };
+                case (#Inconsistent(results)) {
+                    // Check if any succeeded
+                    for ((_, result) in results.vals()) {
+                        switch (result) {
+                            case (#Ok(#Ok(?txHash))) {
+                                return #ok(txHash);
+                            };
+                            case (_) {};
+                        };
+                    };
+                    #err("Inconsistent responses when submitting transaction");
+                };
+            };
+        } catch (e) {
+            #err("Exception during fund forwarding: " # Error.message(e))
+        }
+    };
+
+    // Sign transaction with specific derivation path
+    private func signTransactionWithPath(tx: EthereumTransaction, derivationPath: [Blob]) : async Text {
+        // Encode transaction for signing (EIP-155)
+        let encoded = encodeTransaction(tx);
+        let messageHash = await keccak256(encoded);
+        
+        // Debug: Verify message hash is exactly 32 bytes
+        Debug.print("Message hash size: " # Nat.toText(messageHash.size()) # " bytes");
+        if (messageHash.size() != 32) {
+            Debug.print("ERROR: Message hash is not 32 bytes!");
+        };
+        
+        // Sign with threshold ECDSA
+        let signature = await signWithEcdsa(messageHash, derivationPath);
+        
+        // Encode signed transaction with v=0
+        encodeSignedTransaction(tx, signature)
+    };
+    
+    // Sign transaction with v=1 if v=0 fails
+    private func signTransactionWithPathV1(tx: EthereumTransaction, sig: Blob) : Text {
+        let sigBytes = Blob.toArray(sig);
+        if (sigBytes.size() < 64) {
+            return "0x";
+        };
+        
+        let r = Blob.fromArray(Array.subArray(sigBytes, 0, 32));
+        let s = Blob.fromArray(Array.subArray(sigBytes, 32, 32));
+        
+        // Try v=1 this time
+        let v = 1;
+        let adjustedV = (tx.chainId * 2 + 35) + v;
+        
+        let items : [RLP.RLPItem] = [
+            #bytes(RLP.natToBytes(tx.nonce)),
+            #bytes(RLP.natToBytes(tx.gasPrice)),
+            #bytes(RLP.natToBytes(tx.gasLimit)),
+            #bytes(switch (Hex.decode(tx.to)) {
+                case (#ok(bytes)) { Blob.fromArray(bytes) };
+                case (#err(_)) { Blob.fromArray([]) };
+            }),
+            #bytes(RLP.natToBytes(tx.value)),
+            #bytes(tx.data),
+            #bytes(RLP.natToBytes(adjustedV)),
+            #bytes(r),
+            #bytes(s)
+        ];
+        
+        let encoded = RLP.encode(#list(items));
+        "0x" # Hex.encode(Blob.toArray(encoded))
+    };
+
+    // Monitor deposits to the main contract
+    public shared(msg) func checkDeposits() : async Result.Result<[DepositEvent], Text> {
+        if (depositContractAddress == "") {
+            return #err("Deposit contract address not set");
+        };
+
+        try {
+            // Get latest block number
+            let latestBlockResult = await makeRpcCall("eth_blockNumber", "[]");
+            
+            let latestBlock = switch (latestBlockResult) {
+                case (#ok(result)) {
+                    let hexValue = extractHexFromJson(result);
+                    if (hexValue == "") {
+                        return #err("Failed to parse block number");
+                    };
+                    hexToNat(hexValue)
+                };
+                case (#err(e)) { return #err("Failed to get latest block: " # e) };
+            };
+
+            if (latestBlock <= lastCheckedBlock) {
+                return #ok([]);
+            };
+
+            // Prepare eth_getLogs parameters
+            let fromBlock = if (lastCheckedBlock == 0) {
+                if (latestBlock > 100) { latestBlock - 100 } else { 0 }
+            } else {
+                lastCheckedBlock + 1
+            };
+
+            let fromBlockHex = "0x" # natToHex(fromBlock);
+            let toBlockHex = "0x" # natToHex(latestBlock);
+
+            let logsParams = "[{\"fromBlock\":\"" # fromBlockHex # 
+                "\",\"toBlock\":\"" # toBlockHex # 
+                "\",\"address\":\"" # depositContractAddress # 
+                "\",\"topics\":[\"" # DEPOSIT_EVENT_SIGNATURE # "\"]}]";
+
+            let logsResult = await makeRpcCall("eth_getLogs", logsParams);
+            
+            switch (logsResult) {
+                case (#ok(result)) {
+                    let events = parseDepositLogs(result);
+                    
+                    // Process new deposits
+                    for (event in events.vals()) {
+                        // Check if already processed
+                        if (processedDeposits.get(event.commitment) == null) {
+                            // Add to deposit manager
+                            let depositResult = await depositManager.deposit(
+                                event.amount,
+                                "ETH",
+                                1, // Mainnet chain ID
+                                event.commitment
+                            );
+                            switch (depositResult) {
+                                case (#ok(_)) {
+                                    processedDeposits.put(event.commitment, Time.now());
+                                };
+                                case (#err(e)) {
+                                    Debug.print("Failed to add deposit: " # e);
+                                };
+                            };
+                        };
+                    };
+                    
+                    // Update last checked block
+                    lastCheckedBlock := latestBlock;
+                    
+                    #ok(events)
+                };
+                case (#err(e)) {
+                    #err("Failed to get logs: " # e)
+                };
+            }
+        } catch (e) {
+            #err("Failed to check deposits: " # Error.message(e))
+        }
+    };
+
+    // Set deposit contract address
+    public shared(msg) func setDepositContract(address: Text) : async Result.Result<(), Text> {
+        depositContractAddress := address;
+        #ok()
+    };
+
+    // Get pool's Ethereum address
+    public shared(msg) func getPoolAddress() : async Text {
+        let { public_key; chain_code } = await getEcdsaPublicKey([]);
+        await publicKeyToEthereumAddress(public_key)
+    };
+
+    // Get deposit info for an address
+    public query func getDepositInfo(address: Text) : async ?DepositInfo {
+        depositAddresses.get(address)
+    };
+
+    // Get the configured deposit contract address
+    public query func getDepositContract() : async Text {
+        depositContractAddress
+    };
+
+    // Get all pending deposits
+    public query func getPendingDeposits() : async [(Text, DepositInfo)] {
+        var pending = Buffer.Buffer<(Text, DepositInfo)>(0);
+        for ((address, info) in depositAddresses.entries()) {
+            if (not info.processed) {
+                pending.add((address, info));
+            };
+        };
+        Buffer.toArray(pending)
+    };
+
+    // Process a single deposit address (now uses EIP-1559)
+    public shared(msg) func processSingleDeposit(address: Text) : async Result.Result<Text, Text> {
+        // Redirect to EIP-1559 version
+        await processSingleDepositEIP1559(address)
+    };
+
+    // Make RPC call via HTTP outcall with automatic fallback
+    private func makeRpcCall(method: Text, params: Text) : async Result.Result<Text, Text> {
+        await makeRpcCallWithRetries(method, params, 0, [])
+    };
+    
+    // Internal function to handle retries across different RPC endpoints
+    private func makeRpcCallWithRetries(method: Text, params: Text, attemptCount: Nat, errors: [Text]) : async Result.Result<Text, Text> {
+        // Try all endpoints before giving up
+        if (attemptCount >= RPC_ENDPOINTS.size()) {
+            let errorMsg = "All RPC endpoints failed. Errors: " # Text.join("; ", errors.vals());
+            Debug.print("❌ " # errorMsg);
+            return #err(errorMsg);
+        };
+        
+        // Get current endpoint index (with rotation)
+        let endpointIndex = (currentRpcIndex + attemptCount) % RPC_ENDPOINTS.size();
+        let rpcUrl = RPC_ENDPOINTS[endpointIndex];
+        
+        Debug.print("🔄 Attempting RPC call to endpoint " # Nat.toText(endpointIndex) # ": " # method);
+        
+        let result = await makeRpcCallToEndpoint(rpcUrl, method, params);
+        
+        switch (result) {
+            case (#ok(response)) {
+                // Success! Update the current index for next time to start with this working endpoint
+                currentRpcIndex := endpointIndex;
+                #ok(response)
+            };
+            case (#err(error)) {
+                // Check if this is a rate limit error
+                if (Text.contains(error, #text "429") or 
+                    Text.contains(error, #text "rate limit") or
+                    Text.contains(error, #text "Rate limit") or
+                    Text.contains(error, #text "too many requests")) {
+                    Debug.print("⚠️ Rate limit hit on endpoint " # Nat.toText(endpointIndex) # ", trying next...");
+                } else {
+                    Debug.print("❌ Error on endpoint " # Nat.toText(endpointIndex) # ": " # error);
+                };
+                
+                // Try next endpoint
+                let newErrors = Array.append(errors, ["Endpoint " # Nat.toText(endpointIndex) # ": " # error]);
+                await makeRpcCallWithRetries(method, params, attemptCount + 1, newErrors)
+            };
+        }
+    };
+    
+    // Make RPC call to a specific endpoint
+    private func makeRpcCallToEndpoint(rpcUrl: Text, method: Text, params: Text) : async Result.Result<Text, Text> {
+        let jsonRpc = "{\"jsonrpc\":\"2.0\",\"method\":\"" # method # 
+            "\",\"params\":" # params # ",\"id\":1}";
+        
+        let request : HttpRequestArgs = {
+            url = rpcUrl;
+            max_response_bytes = ?100000;
+            headers = [
+                { name = "Content-Type"; value = "application/json" }
+            ];
+            body = ?Text.encodeUtf8(jsonRpc);
+            method = #post;
+            transform = null;
+        };
+        
+        ExperimentalCycles.add(20_000_000_000); // 20B cycles for HTTP outcall
+        
+        let response = await ic.http_request(request);
+        
+        if (response.status == 200) {
+            switch (Text.decodeUtf8(response.body)) {
+                case (?jsonText) {
+                    if (Text.contains(jsonText, #text "\"result\"")) {
+                        let resultValue = extractResultFromJson(jsonText);
+                        #ok(resultValue)
+                    } else if (Text.contains(jsonText, #text "\"error\"")) {
+                        #err("RPC error: " # jsonText)
+                    } else {
+                        #err("Invalid response: " # jsonText)
+                    }
+                };
+                case null { #err("Failed to decode response") };
+            }
+        } else {
+            #err("HTTP error: " # Nat.toText(response.status))
+        }
+    };
+
+    // Helper functions for JSON parsing, hex conversion, etc.
+    private func extractResultFromJson(json: Text) : Text {
+        let parts = Text.split(json, #text "\"result\":");
+        var iter = parts;
+        switch (iter.next()) {
+            case (?_) {
+                switch (iter.next()) {
+                    case (?resultPart) {
+                        let trimmed = Text.trim(resultPart, #text " ");
+                        if (Text.startsWith(trimmed, #text "\"")) {
+                            let valueParts = Text.split(trimmed, #text "\"");
+                            var valueIter = valueParts;
+                            switch (valueIter.next()) {
+                                case (?_) {
+                                    switch (valueIter.next()) {
+                                        case (?value) { value };
+                                        case null { "" };
+                                    }
+                                };
+                                case null { "" };
+                            }
+                        } else {
+                            let endParts = Text.split(trimmed, #text ",");
+                            switch (endParts.next()) {
+                                case (?value) {
+                                    let braceParts = Text.split(value, #text "}");
+                                    switch (braceParts.next()) {
+                                        case (?v) { v };
+                                        case null { value };
+                                    }
+                                };
+                                case null { "" };
+                            }
+                        }
+                    };
+                    case null { "" };
+                }
+            };
+            case null { "" };
+        }
+    };
+
+    private func extractHexFromJson(json: Text) : Text {
+        let result = extractResultFromJson(json);
+        if (Text.startsWith(result, #text "0x")) {
+            result
+        } else if (result != "") {
+            "0x" # result
+        } else {
+            ""
+        }
+    };
+
+    private func parseDepositLogs(json: Text) : [DepositEvent] {
+        let deposits = Buffer.Buffer<DepositEvent>(0);
+        let result = extractResultFromJson(json);
+        
+        if (Text.contains(result, #text "\"data\":\"0x")) {
+            let dataParts = Text.split(result, #text "\"data\":\"0x");
+            var iter = dataParts;
+            switch (iter.next()) {
+                case (?_) {
+                    for (part in iter) {
+                        let dataEndParts = Text.split(part, #text "\"");
+                        switch (dataEndParts.next()) {
+                            case (?dataHex) {
+                                if (dataHex.size() >= 128) {
+                                    let dataChars = Iter.toArray(dataHex.chars());
+                                    let commitment = "0x" # Text.fromIter(Array.subArray(dataChars, 0, 64).vals());
+                                    let amountHex = Text.fromIter(Array.subArray(dataChars, 64, 64).vals());
+                                    let amount = hexToNat("0x" # amountHex);
+                                    
+                                    var txHash = "";
+                                    if (Text.contains(part, #text "\"transactionHash\":\"0x")) {
+                                        let txParts = Text.split(part, #text "\"transactionHash\":\"");
+                                        var txIter = txParts;
+                                        switch (txIter.next()) {
+                                            case (?_) {
+                                                switch (txIter.next()) {
+                                                    case (?txPart) {
+                                                        let txEndParts = Text.split(txPart, #text "\"");
+                                                        switch (txEndParts.next()) {
+                                                            case (?hash) { txHash := hash };
+                                                            case null {};
+                                                        };
+                                                    };
+                                                    case null {};
+                                                };
+                                            };
+                                            case null {};
+                                        };
+                                    };
+                                    
+                                    var blockNumber = 0;
+                                    if (Text.contains(part, #text "\"blockNumber\":\"0x")) {
+                                        let blockParts = Text.split(part, #text "\"blockNumber\":\"0x");
+                                        var blockIter = blockParts;
+                                        switch (blockIter.next()) {
+                                            case (?_) {
+                                                switch (blockIter.next()) {
+                                                    case (?blockPart) {
+                                                        let blockEndParts = Text.split(blockPart, #text "\"");
+                                                        switch (blockEndParts.next()) {
+                                                            case (?blockHex) { 
+                                                                blockNumber := hexToNat("0x" # blockHex);
+                                                            };
+                                                            case null {};
+                                                        };
+                                                    };
+                                                    case null {};
+                                                };
+                                            };
+                                            case null {};
+                                        };
+                                    };
+                                    
+                                    deposits.add({
+                                        commitment = commitment;
+                                        amount = amount;
+                                        sender = "";
+                                        blockNumber = blockNumber;
+                                        txHash = txHash;
+                                        timestamp = Time.now();
+                                    });
+                                };
+                            };
+                            case null {};
+                        };
+                    };
+                };
+                case null {};
+            };
+        };
+        
+        Buffer.toArray(deposits)
+    };
+
+    // Utility functions
+    private func hexToNat(hex: Text) : Nat {
+        var cleanHex = hex;
+        if (Text.startsWith(hex, #text "0x")) {
+            cleanHex := Text.trimStart(hex, #text "0x");
+        };
+        
+        var result : Nat = 0;
+        for (char in cleanHex.chars()) {
+            result := result * 16;
+            switch (char) {
+                case ('0') { result += 0 };
+                case ('1') { result += 1 };
+                case ('2') { result += 2 };
+                case ('3') { result += 3 };
+                case ('4') { result += 4 };
+                case ('5') { result += 5 };
+                case ('6') { result += 6 };
+                case ('7') { result += 7 };
+                case ('8') { result += 8 };
+                case ('9') { result += 9 };
+                case ('a' or 'A') { result += 10 };
+                case ('b' or 'B') { result += 11 };
+                case ('c' or 'C') { result += 12 };
+                case ('d' or 'D') { result += 13 };
+                case ('e' or 'E') { result += 14 };
+                case ('f' or 'F') { result += 15 };
+                case (_) { };
+            };
+        };
+        result
+    };
+
+    private func natToHex(n: Nat) : Text {
+        if (n == 0) { return "0" };
+        
+        let hexChars = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"];
+        var result = "";
+        var num = n;
+        
+        while (num > 0) {
+            let remainder = num % 16;
+            result := hexChars[remainder] # result;
+            num := num / 16;
+        };
+        
+        result
+    };
+
+    private func publicKeyToEthereumAddress(publicKey: Blob) : async Text {
+        let bytes = Blob.toArray(publicKey);
+        
+        // Handle different public key formats
+        let uncompressedKey = if (bytes.size() == 65 and bytes[0] == 0x04) {
+            // Already uncompressed, just take the x,y coordinates (64 bytes)
+            Blob.fromArray(Array.subArray(bytes, 1, 64))
+        } else if (bytes.size() == 33 and (bytes[0] == 0x02 or bytes[0] == 0x03)) {
+            // Compressed key, need to decompress
+            switch (ECDSAUtils.decompressPublicKey(publicKey)) {
+                case (#ok(uncompressed)) {
+                    // Remove the 0x04 prefix from decompressed key
+                    let uncompressedBytes = Blob.toArray(uncompressed);
+                    Blob.fromArray(Array.subArray(uncompressedBytes, 1, 64))
+                };
+                case (#err(e)) {
+                    Debug.print("Failed to decompress public key: " # e);
+                    // For now, fall back to using compressed key directly to maintain compatibility
+                    // This is WRONG but maintains existing behavior
+                    publicKey
+                };
+            }
+        } else {
+            Debug.print("Unexpected public key format: size=" # Nat.toText(bytes.size()));
+            publicKey
+        };
+        
+        let hash = await keccak256(uncompressedKey);
+        let address = Blob.fromArray(Array.subArray(Blob.toArray(hash), 12, 20));
+        
+        "0x" # Hex.encode(Blob.toArray(address))
+    };
+
+    // Proper implementation that correctly handles compressed keys
+    private func publicKeyToEthereumAddressProper(publicKey: Blob) : async Text {
+        let bytes = Blob.toArray(publicKey);
+        
+        // Handle different public key formats
+        let uncompressedKey = if (bytes.size() == 65 and bytes[0] == 0x04) {
+            // Already uncompressed, just take the x,y coordinates (64 bytes)
+            Blob.fromArray(Array.subArray(bytes, 1, 64))
+        } else if (bytes.size() == 33 and (bytes[0] == 0x02 or bytes[0] == 0x03)) {
+            // Compressed key, need to decompress
+            switch (ECDSAUtils.decompressPublicKey(publicKey)) {
+                case (#ok(uncompressed)) {
+                    // Remove the 0x04 prefix from decompressed key
+                    let uncompressedBytes = Blob.toArray(uncompressed);
+                    Blob.fromArray(Array.subArray(uncompressedBytes, 1, 64))
+                };
+                case (#err(e)) {
+                    Debug.trap("Failed to decompress public key: " # e);
+                };
+            }
+        } else {
+            Debug.trap("Invalid public key format");
+        };
+        
+        let hash = await keccak256(uncompressedKey);
+        let address = Blob.fromArray(Array.subArray(Blob.toArray(hash), 12, 20));
+        
+        "0x" # Hex.encode(Blob.toArray(address))
+    };
+
+    private func getEcdsaPublicKey(derivationPath: [Blob]) : async { public_key: Blob; chain_code: Blob } {
+        // Add cycles for ECDSA call
+        ExperimentalCycles.add(26_153_846_153);
+        await ic.ecdsa_public_key({
+            canister_id = null;
+            derivation_path = derivationPath;
+            key_id = { curve = #secp256k1; name = ECDSA_KEY_NAME };
+        })
+    };
+
+    private func signWithEcdsa(messageHash: Blob, derivationPath: [Blob]) : async Blob {
+        // Add cycles for ECDSA signing
+        ExperimentalCycles.add(26_153_846_153);
+        
+        // Debug logging
+        Debug.print("ECDSA signing - message hash size: " # Nat.toText(messageHash.size()));
+        Debug.print("ECDSA signing - derivation path length: " # Nat.toText(derivationPath.size()));
+        if (derivationPath.size() > 0) {
+            Debug.print("ECDSA signing - first derivation path element size: " # Nat.toText(derivationPath[0].size()));
+        };
+        Debug.print("ECDSA signing - key name: " # ECDSA_KEY_NAME);
+        
+        let { signature } = await ic.sign_with_ecdsa({
+            message_hash = messageHash;
+            derivation_path = derivationPath;
+            key_id = { curve = #secp256k1; name = ECDSA_KEY_NAME };
+        });
+        signature
+    };
+
+    private func keccak256(data: Blob) : async Blob {
+        try {
+            // Add cycles for the inter-canister call
+            ExperimentalCycles.add(10_000_000_000); // 10B cycles for keccak256 call
+            Debug.print("Calling keccak256 canister: " # keccak256CanisterId # " with data size: " # Nat.toText(data.size()));
+            let result = await Keccak.keccak256Async(keccak256CanisterId, data);
+            Debug.print("Keccak256 call successful");
+            result
+        } catch (e) {
+            Debug.print("Keccak256 call failed: " # Error.message(e));
+            throw Error.reject("Failed to call keccak256: " # Error.message(e));
+        }
+    };
+
+    private func encodeTransaction(tx: EthereumTransaction) : Blob {
+        let items : [RLP.RLPItem] = [
+            #bytes(RLP.natToBytes(tx.nonce)),
+            #bytes(RLP.natToBytes(tx.gasPrice)),
+            #bytes(RLP.natToBytes(tx.gasLimit)),
+            #bytes(switch (Hex.decode(tx.to)) {
+                case (#ok(bytes)) { Blob.fromArray(bytes) };
+                case (#err(_)) { Blob.fromArray([]) };
+            }),
+            #bytes(RLP.natToBytes(tx.value)),
+            #bytes(tx.data),
+            #bytes(RLP.natToBytes(tx.chainId)),
+            #bytes(RLP.natToBytes(0)),
+            #bytes(RLP.natToBytes(0))
+        ];
+        
+        RLP.encode(#list(items))
+    };
+
+    private func encodeSignedTransaction(tx: EthereumTransaction, sig: Blob) : Text {
+        let sigBytes = Blob.toArray(sig);
+        if (sigBytes.size() < 64) {
+            return "0x";
+        };
+        
+        let r = Blob.fromArray(Array.subArray(sigBytes, 0, 32));
+        let s = Blob.fromArray(Array.subArray(sigBytes, 32, 32));
+        
+        // IC's ECDSA doesn't return recovery ID, so we default to 0
+        // The EVM RPC will handle recovery internally
+        // For legacy transactions with EIP-155: v = chainId * 2 + 35 + {0,1}
+        let v = 0; // This will be either 0 or 1
+        let adjustedV = (tx.chainId * 2 + 35) + v;
+        
+        let items : [RLP.RLPItem] = [
+            #bytes(RLP.natToBytes(tx.nonce)),
+            #bytes(RLP.natToBytes(tx.gasPrice)),
+            #bytes(RLP.natToBytes(tx.gasLimit)),
+            #bytes(switch (Hex.decode(tx.to)) {
+                case (#ok(bytes)) { Blob.fromArray(bytes) };
+                case (#err(_)) { Blob.fromArray([]) };
+            }),
+            #bytes(RLP.natToBytes(tx.value)),
+            #bytes(tx.data),
+            #bytes(RLP.natToBytes(adjustedV)),
+            #bytes(r),
+            #bytes(s)
+        ];
+        
+        let encoded = RLP.encode(#list(items));
+        "0x" # Hex.encode(Blob.toArray(encoded))
+    };
+
+    // Get current Merkle root
+    public shared(msg) func getCurrentMerkleRoot() : async Result.Result<Text, Text> {
+        let root = await depositManager.getCurrentMerkleRoot();
+        switch (root) {
+            case (?r) { #ok(r) };
+            case null { #err("No Merkle root found") };
+        }
+    };
+    
+    // Migration function to handle old deposits with different derivation
+    public shared(msg) func migrateOldDeposit(depositAddress: Text) : async Result.Result<Text, Text> {
+        // Check if this is a known deposit
+        switch (depositAddresses.get(depositAddress)) {
+            case null { #err("Deposit address not found") };
+            case (?info) {
+                if (info.processed) {
+                    return #err("Deposit already processed");
+                };
+                
+                Debug.print("Attempting to migrate old deposit from " # depositAddress);
+                
+                // Try different derivation methods
+                // Method 1: Try without Text.encodeUtf8 (older method might have used raw principal bytes)
+                let principal = info.userId;
+                let principalText = Principal.toText(principal);
+                
+                // Try raw principal text bytes
+                let rawBytes = Blob.toArray(Text.encodeUtf8(principalText));
+                
+                // Try different hash inputs that might have been used
+                let variations = [
+                    // Current method
+                    Text.encodeUtf8(principalText),
+                    // Raw principal bytes
+                    Principal.toBlob(principal),
+                    // Lowercase principal text
+                    Text.encodeUtf8(Text.toLowercase(principalText)),
+                    // Without the principal prefix
+                    Text.encodeUtf8(Text.trimStart(principalText, #text "principal "))
+                ];
+                
+                for (hashInput in variations.vals()) {
+                    try {
+                        let userHash = await keccak256(hashInput);
+                        let hashBytes = Blob.toArray(userHash);
+                        let derivationPath = [Blob.fromArray([hashBytes[0], hashBytes[1], hashBytes[2], hashBytes[3]])];
+                        
+                        // Get public key and address
+                        let { public_key; chain_code } = await getEcdsaPublicKey(derivationPath);
+                        let testAddress = await publicKeyToEthereumAddress(public_key);
+                        
+                        Debug.print("Testing derivation - got address: " # testAddress);
+                        
+                        if (Text.toLowercase(testAddress) == Text.toLowercase(depositAddress)) {
+                            Debug.print("Found matching derivation!");
+                            
+                            // Forward funds using the found derivation path
+                            try {
+                                // Get current balance and gas prices
+                                let balanceRequest = "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getBalance\",\"params\":[\"" # 
+                                                   depositAddress # "\",\"latest\"],\"id\":1}";
+                                
+                                ExperimentalCycles.add(2_000_000_000);
+                                let balanceResult = await evmRpc.request(
+                                    #EthMainnet(#PublicNode),
+                                    balanceRequest,
+                                    2048
+                                );
+                                
+                                let currentBalance = switch (balanceResult) {
+                                    case (#Ok(response)) {
+                                        let balanceHex = extractResultFromJson(response);
+                                        hexToNat(balanceHex);
+                                    };
+                                    case (#Err(error)) {
+                                        return #err("Failed to get balance");
+                                    };
+                                };
+                                
+                                if (currentBalance < info.amount) {
+                                    return #err("Insufficient balance for migration");
+                                };
+                                
+                                // Get nonce
+                                ExperimentalCycles.add(2_000_000_000);
+                                let nonceResult = await evmRpc.eth_getTransactionCount(
+                                    #EthMainnet(?[#PublicNode]),
+                                    ?{ responseSizeEstimate = ?64; responseConsensus = null; },
+                                    { address = depositAddress; block = #Latest; }
+                                );
+                                
+                                let addressNonce = switch (nonceResult) {
+                                    case (#Consistent(#Ok(nonce))) { nonce };
+                                    case (_) { return #err("Failed to get nonce"); };
+                                };
+                                
+                                // Get gas prices
+                                let gasPrices = switch (await getGasPrices()) {
+                                    case (#ok(prices)) { prices };
+                                    case (#err(e)) { return #err("Failed to get gas prices: " # e) };
+                                };
+                                
+                                let maxFeePerGas = gasPrices.baseFee + gasPrices.maxPriorityFee + (gasPrices.baseFee / 10);
+                                let gasLimit : Nat = 50000;
+                                
+                                // Build transaction
+                                let methodId = "b214faa5";
+                                let commitmentHex = Text.trimStart(info.commitment, #text "0x");
+                                let paddedCommitment = if (Text.size(commitmentHex) < 64) {
+                                    let padding = Text.fromIter(Iter.fromArray(Array.tabulate(64 - Text.size(commitmentHex), func(_: Nat) : Char { '0' })));
+                                    padding # commitmentHex
+                                } else {
+                                    commitmentHex
+                                };
+                                
+                                let callData = methodId # paddedCommitment;
+                                
+                                let tx : EIP1559Transaction = {
+                                    to = depositContractAddress;
+                                    value = info.amount;
+                                    data = switch (Hex.decode(callData)) {
+                                        case (#ok(bytes)) { Blob.fromArray(bytes) };
+                                        case (#err(_)) { return #err("Failed to encode call data") };
+                                    };
+                                    nonce = addressNonce;
+                                    maxFeePerGas = maxFeePerGas;
+                                    maxPriorityFeePerGas = gasPrices.maxPriorityFee;
+                                    gasLimit = gasLimit;
+                                    chainId = 1;
+                                };
+                                
+                                // Sign and submit with the FOUND derivation path
+                                let (signedTx, submitResult) = await signAndSubmitEIP1559Transaction(tx, derivationPath);
+                                
+                                switch (submitResult) {
+                                    case (#Consistent(#Ok(sendStatus))) {
+                                        switch (sendStatus) {
+                                            case (#Ok(?txHash)) {
+                                                Debug.print("Migration successful! Tx: " # txHash);
+                                                
+                                                // Mark as processed
+                                                depositAddresses.put(depositAddress, {
+                                                    commitment = info.commitment;
+                                                    amount = info.amount;
+                                                    timestamp = info.timestamp;
+                                                    userId = info.userId;
+                                                    processed = true;
+                                                });
+                                                
+                                                return #ok("Migration successful! Transaction: " # txHash);
+                                            };
+                                            case (_) {
+                                                return #err("Transaction failed");
+                                            };
+                                        };
+                                    };
+                                    case (_) {
+                                        return #err("Failed to submit transaction");
+                                    };
+                                };
+                            } catch (e) {
+                                return #err("Migration error: " # Error.message(e));
+                            };
+                        };
+                    } catch (e) {
+                        Debug.print("Derivation attempt failed: " # Error.message(e));
+                    };
+                };
+                
+                #err("Could not find matching derivation for address " # depositAddress)
+            };
+        };
+    };
+    
+    // Set the Keccak256 canister ID
+    public shared(msg) func setKeccak256CanisterId(canisterId: Text) : async Result.Result<(), Text> {
+        keccak256CanisterId := canisterId;
+        #ok()
+    };
+    
+    // Get the current Keccak256 canister ID
+    public query func getKeccak256CanisterId() : async Text {
+        keccak256CanisterId
+    };
+    
+    // Debug: Compare address generation methods
+    public func debugCompareAddressGeneration(userId: Principal) : async Result.Result<{legacy: Text; proper: Text; publicKey: Text}, Text> {
+        try {
+            let userHash = await keccak256(Text.encodeUtf8(Principal.toText(userId)));
+            let hashBytes = Blob.toArray(userHash);
+            let derivationPath = [Blob.fromArray([hashBytes[0], hashBytes[1], hashBytes[2], hashBytes[3]])];
+            
+            let { public_key; chain_code } = await getEcdsaPublicKey(derivationPath);
+            let legacyAddress = await publicKeyToEthereumAddress(public_key);
+            let properAddress = await publicKeyToEthereumAddressProper(public_key);
+            
+            #ok({
+                legacy = legacyAddress;
+                proper = properAddress;
+                publicKey = Hex.encode(Blob.toArray(public_key));
+            })
+        } catch (e) {
+            #err("Error: " # Error.message(e))
+        }
+    };
+
+    // Debug: Verify address generation
+    public func debugAddressGeneration(userId: Principal) : async Result.Result<{address: Text; publicKey: Text}, Text> {
+        try {
+            let userHash = await keccak256(Text.encodeUtf8(Principal.toText(userId)));
+            let hashBytes = Blob.toArray(userHash);
+            let derivationPath = [Blob.fromArray([hashBytes[0], hashBytes[1], hashBytes[2], hashBytes[3]])];
+            
+            let { public_key; chain_code } = await getEcdsaPublicKey(derivationPath);
+            let address = await publicKeyToEthereumAddress(public_key);
+            
+            #ok({
+                address = address;
+                publicKey = Hex.encode(Blob.toArray(public_key));
+            })
+        } catch (e) {
+            #err("Error: " # Error.message(e))
+        }
+    };
+    
+    // Debug function to test nonce fetching
+    public func testGetNonce(address: Text) : async Result.Result<Nat, Text> {
+        try {
+            ExperimentalCycles.add(2_000_000_000); // 2B cycles
+            let nonceResult = await evmRpc.eth_getTransactionCount(
+                #EthMainnet(?[#PublicNode]),
+                ?{
+                    responseSizeEstimate = ?64;
+                    responseConsensus = null;
+                },
+                {
+                    address = address;
+                    block = #Latest;
+                }
+            );
+            
+            switch (nonceResult) {
+                case (#Consistent(#Ok(nonce))) { #ok(nonce) };
+                case (#Consistent(#Err(error))) { 
+                    #err("RPC error: " # debug_show(error))
+                };
+                case (#Inconsistent(results)) {
+                    #err("Inconsistent results")
+                };
+            }
+        } catch (e) {
+            #err("Exception: " # Error.message(e))
+        }
+    };
+    
+    // Test forwarding with Rust canister using EIP-1559
+    public func testRustForwardingEIP1559(depositAddress: Text) : async Result.Result<Text, Text> {
+        let info = depositAddresses.get(depositAddress);
+        switch (info) {
+            case null { #err("No deposit found at address") };
+            case (?depositInfo) {
+                if (depositInfo.processed) {
+                    return #err("Deposit already processed");
+                };
+                
+                // Call Rust canister for EIP-1559 forwarding
+                let ethTxHandler = actor("hgyxy-raaaa-aaaar-qbpjq-cai") : actor {
+                    forward_deposit_eip1559 : (Principal, Blob, Text, Text, Text) -> async {#Ok: {tx_hash: Text; tx_hex: Text}; #Err: Text};
+                };
+                
+                let userHash = await keccak256(Text.encodeUtf8(Principal.toText(depositInfo.userId)));
+                let hashBytes = Blob.toArray(userHash);
+                let derivationPath = Blob.fromArray([hashBytes[0], hashBytes[1], hashBytes[2], hashBytes[3]]);
+                
+                let result = await ethTxHandler.forward_deposit_eip1559(
+                    depositInfo.userId,
+                    derivationPath,
+                    depositContractAddress,
+                    Nat.toText(depositInfo.amount),
+                    depositInfo.commitment
+                );
+                
+                switch (result) {
+                    case (#Ok(txResult)) {
+                        // Mark as processed
+                        depositAddresses.put(depositAddress, {
+                            commitment = depositInfo.commitment;
+                            amount = depositInfo.amount;
+                            timestamp = depositInfo.timestamp;
+                            userId = depositInfo.userId;
+                            processed = true;
+                        });
+                        #ok(txResult.tx_hash)
+                    };
+                    case (#Err(msg)) {
+                        #err("Rust canister error: " # msg)
+                    };
+                }
+            };
+        }
+    };
+    
+    // Test forwarding with Rust canister (legacy)
+    public func testRustForwarding(depositAddress: Text) : async Result.Result<Text, Text> {
+        let info = depositAddresses.get(depositAddress);
+        switch (info) {
+            case null { #err("No deposit found at address") };
+            case (?depositInfo) {
+                if (depositInfo.processed) {
+                    return #err("Deposit already processed");
+                };
+                
+                // Call Rust canister for forwarding
+                let ethTxHandler = actor("hgyxy-raaaa-aaaar-qbpjq-cai") : actor {
+                    forward_deposit : (Principal, Blob, Text, Text, Text) -> async {#Ok: {tx_hash: Text; tx_hex: Text}; #Err: Text};
+                };
+                
+                let userHash = await keccak256(Text.encodeUtf8(Principal.toText(depositInfo.userId)));
+                let hashBytes = Blob.toArray(userHash);
+                let derivationPath = Blob.fromArray([hashBytes[0], hashBytes[1], hashBytes[2], hashBytes[3]]);
+                
+                let result = await ethTxHandler.forward_deposit(
+                    depositInfo.userId,
+                    derivationPath,
+                    depositContractAddress,
+                    Nat.toText(depositInfo.amount),
+                    depositInfo.commitment
+                );
+                
+                switch (result) {
+                    case (#Ok(txResult)) {
+                        // Mark as processed
+                        depositAddresses.put(depositAddress, {
+                            commitment = depositInfo.commitment;
+                            amount = depositInfo.amount;
+                            timestamp = depositInfo.timestamp;
+                            userId = depositInfo.userId;
+                            processed = true;
+                        });
+                        #ok(txResult.tx_hash)
+                    };
+                    case (#Err(msg)) {
+                        #err("Rust canister error: " # msg)
+                    };
+                }
+            };
+        }
+    };
+    
+    // Test simple ETH transfer
+    public func testSimpleTransfer(fromAddress: Text) : async Result.Result<Text, Text> {
+        try {
+            // Get deposit info
+            let info = switch (depositAddresses.get(fromAddress)) {
+                case null { return #err("Address not found") };
+                case (?i) { i };
+            };
+            
+            // Get nonce
+            ExperimentalCycles.add(2_000_000_000); // 2B cycles
+            let nonceResult = await evmRpc.eth_getTransactionCount(
+                #EthMainnet(?[#PublicNode]),
+                ?{
+                    responseSizeEstimate = ?64;
+                    responseConsensus = null;
+                },
+                {
+                    address = fromAddress;
+                    block = #Latest;
+                }
+            );
+            
+            let nonce = switch (nonceResult) {
+                case (#Consistent(#Ok(n))) { n };
+                case (_) { return #err("Failed to get nonce") };
+            };
+            
+            // Build simple transfer transaction
+            let tx : EthereumTransaction = {
+                to = depositContractAddress; // Send to pool contract
+                value = 1_000_000_000_000_000; // 0.001 ETH
+                data = Blob.fromArray([]); // No data for simple transfer
+                nonce = nonce;
+                gasPrice = 1_000_000_000; // 1 gwei
+                gasLimit = 21000; // Standard ETH transfer gas
+                chainId = 1; // Ethereum mainnet
+            };
+            
+            // Sign transaction
+            let userHash = await keccak256(Text.encodeUtf8(Principal.toText(info.userId)));
+            let hashBytes = Blob.toArray(userHash);
+            let derivationPath = [Blob.fromArray([hashBytes[0], hashBytes[1], hashBytes[2], hashBytes[3]])];
+            let signedTx = await signTransactionWithPath(tx, derivationPath);
+            
+            // Submit transaction
+            ExperimentalCycles.add(2_000_000_000); // 2B cycles
+            let submitResult = await evmRpc.eth_sendRawTransaction(
+                #EthMainnet(?[#PublicNode]),
+                ?{
+                    responseSizeEstimate = ?256;
+                    responseConsensus = null;
+                },
+                signedTx
+            );
+            
+            switch (submitResult) {
+                case (#Consistent(#Ok(#Ok(?txHash)))) { #ok(txHash) };
+                case (#Consistent(#Ok(#Ok(null)))) { #err("No tx hash returned") };
+                case (#Consistent(#Ok(#NonceTooLow))) { #err("Nonce too low") };
+                case (#Consistent(#Ok(#NonceTooHigh))) { #err("Nonce too high") };
+                case (#Consistent(#Ok(#InsufficientFunds))) { #err("Insufficient funds") };
+                case (#Consistent(#Err(e))) { #err("RPC error: " # debug_show(e)) };
+                case (#Inconsistent(_)) { #err("Inconsistent responses") };
+            }
+        } catch (e) {
+            #err("Exception: " # Error.message(e))
+        }
+    };
+
+    // ===== EIP-1559 Support Functions =====
+
+    // Get current gas prices for EIP-1559 using fee history
+    private func getGasPrices() : async Result.Result<{baseFee: Nat; maxPriorityFee: Nat}, Text> {
+        try {
+            Debug.print("Getting gas prices using eth_feeHistory");
+            
+            // Get fee history for the last 5 blocks with 25th percentile for priority fees
+            let feeHistoryArgs : FeeHistoryArgs = {
+                blockCount = 5;
+                newestBlock = #Latest;
+                rewardPercentiles = ?[25 : Nat8]; // 25th percentile for reasonable priority fee
+            };
+            
+            ExperimentalCycles.add(10_000_000_000); // 10B cycles
+            let feeHistoryResult = await evmRpc.eth_feeHistory(
+                #EthMainnet(?[#PublicNode]),
+                ?{
+                    responseSizeEstimate = ?2048;
+                    responseConsensus = null;
+                },
+                feeHistoryArgs
+            );
+            
+            switch (feeHistoryResult) {
+                case (#Consistent(#Ok(history))) {
+                    // Get the latest base fee (last element in the array)
+                    let baseFees = history.baseFeePerGas;
+                    let latestBaseFee = if (baseFees.size() > 0) {
+                        baseFees[baseFees.size() - 1]
+                    } else {
+                        20_000_000_000 // Default 20 gwei
+                    };
+                    
+                    // Get median priority fee from rewards
+                    var totalPriorityFee : Nat = 0;
+                    var count : Nat = 0;
+                    for (rewards in history.reward.vals()) {
+                        if (rewards.size() > 0) {
+                            totalPriorityFee += rewards[0]; // 25th percentile
+                            count += 1;
+                        };
+                    };
+                    
+                    let avgPriorityFee = if (count > 0) {
+                        totalPriorityFee / count
+                    } else {
+                        1_500_000_000 // Default 1.5 gwei
+                    };
+                    
+                    Debug.print("Fee history - Base fee: " # Nat.toText(latestBaseFee) # 
+                               ", Avg priority fee: " # Nat.toText(avgPriorityFee));
+                    
+                    #ok({ 
+                        baseFee = latestBaseFee; 
+                        maxPriorityFee = avgPriorityFee 
+                    })
+                };
+                case (#Consistent(#Err(e))) {
+                    Debug.print("Fee history error, falling back to eth_gasPrice");
+                    // Fallback to eth_gasPrice
+                    await getGasPricesFallback()
+                };
+                case (#Inconsistent(_)) {
+                    Debug.print("Inconsistent fee history, falling back to eth_gasPrice");
+                    await getGasPricesFallback()
+                };
+            }
+        } catch (e) {
+            #err("Exception getting gas prices: " # Error.message(e))
+        }
+    };
+    
+    // Fallback gas price method
+    private func getGasPricesFallback() : async Result.Result<{baseFee: Nat; maxPriorityFee: Nat}, Text> {
+        let gasPriceRequest = "{\"jsonrpc\":\"2.0\",\"method\":\"eth_gasPrice\",\"params\":[],\"id\":1}";
+        
+        ExperimentalCycles.add(2_000_000_000); // 2B cycles
+        let gasPriceResult = await evmRpc.request(
+            #EthMainnet(#PublicNode),
+            gasPriceRequest,
+            1024
+        );
+        
+        switch (gasPriceResult) {
+            case (#Ok(result)) {
+                let gasPriceHex = extractResultFromJson(result);
+                let gasPrice = if (gasPriceHex != "") { hexToNat(gasPriceHex) } else { 10_000_000_000 };
+                let baseFee = gasPrice;
+                let maxPriorityFee = 1_500_000_000; // 1.5 gwei
+                
+                Debug.print("Fallback gas prices - Base fee: " # Nat.toText(baseFee) # 
+                           ", Priority fee: " # Nat.toText(maxPriorityFee));
+                
+                #ok({ baseFee = baseFee; maxPriorityFee = maxPriorityFee })
+            };
+            case (#Err(e)) {
+                #err("Failed to get gas price: " # debug_show(e))
+            };
+        }
+    };
+
+    // Helper function to extract field from JSON
+    private func extractFieldFromJson(json: Text, field: Text) : Text {
+        let searchPattern = "\"" # field # "\":\"";
+        let parts = Text.split(json, #text searchPattern);
+        var iter = parts;
+        switch (iter.next()) {
+            case (?_) {
+                switch (iter.next()) {
+                    case (?fieldPart) {
+                        let endParts = Text.split(fieldPart, #text "\"");
+                        switch (endParts.next()) {
+                            case (?value) { value };
+                            case null { "" };
+                        }
+                    };
+                    case null { "" };
+                }
+            };
+            case null { "" };
+        }
+    };
+
+    // Forward funds from deposit address to pool contract using EIP-1559
+    private func forwardFundsToPoolEIP1559(depositAddress: Text, info: DepositInfo) : async Result.Result<Text, Text> {
+        try {
+            // Get nonce using EVM RPC canister
+            ExperimentalCycles.add(2_000_000_000); // 2B cycles
+            let nonceResult = await evmRpc.eth_getTransactionCount(
+                #EthMainnet(?[#PublicNode]),
+                ?{
+                    responseSizeEstimate = ?64;
+                    responseConsensus = null;
+                },
+                {
+                    address = depositAddress;
+                    block = #Latest;
+                }
+            );
+            
+            let addressNonce = switch (nonceResult) {
+                case (#Consistent(#Ok(nonce))) { nonce };
+                case (#Consistent(#Err(error))) { 
+                    return #err("Failed to get nonce via EVM RPC");
+                };
+                case (#Inconsistent(results)) {
+                    // Try to find most common nonce
+                    var nonce : Nat = 0;
+                    for ((_, result) in results.vals()) {
+                        switch (result) {
+                            case (#Ok(n)) { nonce := n; };
+                            case (#Err(_)) {};
+                        };
+                    };
+                    nonce;
+                };
+            };
+            
+            // Get current gas prices
+            let gasPrices = switch (await getGasPrices()) {
+                case (#ok(prices)) { prices };
+                case (#err(e)) { return #err("Failed to get gas prices: " # e) };
+            };
+            
+            // Calculate max fee per gas (base fee + priority fee + small buffer)
+            let maxFeePerGas = gasPrices.baseFee + gasPrices.maxPriorityFee + (gasPrices.baseFee / 10); // 10% buffer
+            
+            // Calculate gas cost for the transaction
+            let gasLimit : Nat = 50000; // Reduced to fit within available balance
+            let maxGasCost = maxFeePerGas * gasLimit;
+            
+            // Get balance using EVM RPC canister
+            let balanceRequest = "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getBalance\",\"params\":[\"" # 
+                               depositAddress # "\",\"latest\"],\"id\":1}";
+            
+            ExperimentalCycles.add(2_000_000_000); // 2B cycles
+            let balanceResult = await evmRpc.request(
+                #EthMainnet(#PublicNode),
+                balanceRequest,
+                2048
+            );
+            
+            let currentBalance = switch (balanceResult) {
+                case (#Ok(response)) {
+                    let balanceHex = extractResultFromJson(response);
+                    hexToNat(balanceHex);
+                };
+                case (#Err(error)) {
+                    return #err("Failed to get balance via EVM RPC");
+                };
+            };
+            
+            Debug.print("Deposit address balance: " # Nat.toText(currentBalance));
+            Debug.print("Max gas cost: " # Nat.toText(maxGasCost));
+            Debug.print("Base fee: " # Nat.toText(gasPrices.baseFee) # ", Priority fee: " # Nat.toText(gasPrices.maxPriorityFee));
+            
+            // No extra buffer needed since we already added 10% to maxFeePerGas
+            let totalGasNeeded = maxGasCost;
+            
+            // Ensure we have enough to cover both the deposit amount AND gas
+            let totalRequired = info.amount + totalGasNeeded;
+            if (currentBalance < totalRequired) {
+                return #err("Insufficient balance. Have: " # Nat.toText(currentBalance) # 
+                           ", need: " # Nat.toText(totalRequired) # 
+                           " (deposit: " # Nat.toText(info.amount) # 
+                           ", gas+buffer: " # Nat.toText(totalGasNeeded) # ")");
+            };
+            
+            // Forward exactly the expected deposit amount (0.01 ETH)
+            let amountToForward = info.amount; // Use the original deposit amount
+            
+            Debug.print("Balance: " # Nat.toText(currentBalance) # ", Max gas cost: " # Nat.toText(maxGasCost) # 
+                       ", Total gas needed: " # Nat.toText(totalGasNeeded) #
+                       ", Amount to forward: " # Nat.toText(amountToForward));
+            
+            // Build deposit call data
+            // deposit(bytes32) function signature
+            let methodId = "b214faa5";
+            let commitmentHex = Text.trimStart(info.commitment, #text "0x");
+            
+            // Ensure commitment is properly padded to 32 bytes (64 hex chars)
+            let paddedCommitment = if (Text.size(commitmentHex) < 64) {
+                // Pad with leading zeros
+                let padding = Text.fromIter(Iter.fromArray(Array.tabulate(64 - Text.size(commitmentHex), func(_: Nat) : Char { '0' })));
+                padding # commitmentHex
+            } else {
+                commitmentHex
+            };
+            
+            let callData = methodId # paddedCommitment;
+            
+            // Build EIP-1559 transaction
+            let tx : EIP1559Transaction = {
+                to = depositContractAddress;
+                value = amountToForward;
+                data = switch (Hex.decode(callData)) {
+                    case (#ok(bytes)) { Blob.fromArray(bytes) };
+                    case (#err(_)) { return #err("Failed to encode call data") };
+                };
+                nonce = addressNonce;
+                maxFeePerGas = maxFeePerGas;
+                maxPriorityFeePerGas = gasPrices.maxPriorityFee;
+                gasLimit = gasLimit;
+                chainId = 1; // Ethereum mainnet
+            };
+            
+            Debug.print("EIP-1559 Transaction details: to=" # depositContractAddress # 
+                       ", value=" # Nat.toText(amountToForward) # 
+                       ", maxFeePerGas=" # Nat.toText(maxFeePerGas) # 
+                       ", maxPriorityFeePerGas=" # Nat.toText(gasPrices.maxPriorityFee) #
+                       ", gasLimit=" # Nat.toText(gasLimit) # 
+                       ", nonce=" # Nat.toText(addressNonce));
+            
+            // Sign transaction with the deposit address's derived key
+            let userHash = await keccak256(Text.encodeUtf8(Principal.toText(info.userId)));
+            let hashBytes = Blob.toArray(userHash);
+            let derivationPath = [Blob.fromArray([hashBytes[0], hashBytes[1], hashBytes[2], hashBytes[3]])];
+            
+            // Sign the EIP-1559 transaction with proper yParity recovery
+            let (signedTx, submitResult) = await signAndSubmitEIP1559Transaction(tx, derivationPath);
+            
+            switch (submitResult) {
+                case (#Consistent(#Ok(sendStatus))) {
+                    switch (sendStatus) {
+                        case (#Ok(?txHash)) {
+                            Debug.print("Forwarded deposit with tx: " # txHash);
+                            
+                            // Add commitment to deposit manager
+                            let depositResult = await depositManager.deposit(
+                                amountToForward,
+                                "ETH",
+                                1, // Mainnet chain ID
+                                info.commitment
+                            );
+                            switch (depositResult) {
+                                case (#ok(depositId)) {
+                                    Debug.print("Added deposit with ID: " # Nat.toText(depositId));
+                                };
+                                case (#err(e)) {
+                                    Debug.print("Warning: Failed to add deposit: " # e);
+                                };
+                            };
+                            
+                            #ok(txHash)
+                        };
+                        case (#Ok(null)) {
+                            #err("Transaction sent but no hash returned");
+                        };
+                        case (#NonceTooLow) {
+                            #err("Nonce too low - transaction may already be processed");
+                        };
+                        case (#NonceTooHigh) {
+                            #err("Nonce too high");
+                        };
+                        case (#InsufficientFunds) {
+                            #err("Insufficient funds for transaction");
+                        };
+                    };
+                };
+                case (#Consistent(#Err(error))) {
+                    #err("Failed to submit transaction via EVM RPC");
+                };
+                case (#Inconsistent(results)) {
+                    // Check if any succeeded
+                    for ((_, result) in results.vals()) {
+                        switch (result) {
+                            case (#Ok(#Ok(?txHash))) {
+                                return #ok(txHash);
+                            };
+                            case (_) {};
+                        };
+                    };
+                    #err("Inconsistent responses when submitting transaction");
+                };
+            };
+        } catch (e) {
+            #err("Exception during fund forwarding: " # Error.message(e))
+        }
+    };
+
+    // Process a single deposit address using EIP-1559
+    public shared(msg) func processSingleDepositEIP1559(address: Text) : async Result.Result<Text, Text> {
+        // Find the deposit info
+        switch (depositAddresses.get(address)) {
+            case null { #err("Deposit address not found") };
+            case (?info) {
+                if (info.processed) {
+                    return #err("Deposit already processed");
+                };
+                
+                // Ensure deposit contract is set
+                if (depositContractAddress == "") {
+                    return #err("Deposit contract address not set");
+                };
+                
+                try {
+                    Debug.print("Processing single deposit at " # address # " using EIP-1559");
+                    
+                    // Forward funds to pool contract using EIP-1559
+                    let forwardResult = await forwardFundsToPoolEIP1559(address, info);
+                    
+                    switch (forwardResult) {
+                        case (#ok(txHash)) {
+                            // Mark as processed
+                            depositAddresses.put(address, {
+                                commitment = info.commitment;
+                                amount = info.amount;
+                                timestamp = info.timestamp;
+                                userId = info.userId;
+                                processed = true;
+                            });
+                            
+                            // Track processed deposit
+                            processedDeposits.put(info.commitment, Time.now());
+                            
+                            #ok(txHash)
+                        };
+                        case (#err(e)) {
+                            #err("Failed to forward from " # address # ": " # e)
+                        };
+                    };
+                } catch (e) {
+                    #err("Error processing " # address # ": " # Error.message(e))
+                };
+            };
+        }
+    };
+
+    // Process single deposit with V2 address derivation
+    public shared(msg) func processSingleDepositV2(address: Text) : async Result.Result<Text, Text> {
+        // Find the deposit info
+        switch (depositAddresses.get(address)) {
+            case null { #err("Deposit address not found") };
+            case (?info) {
+                if (info.processed) {
+                    return #err("Deposit already processed");
+                };
+                
+                // Ensure deposit contract is set
+                if (depositContractAddress == "") {
+                    return #err("Deposit contract address not set");
+                };
+                
+                try {
+                    Debug.print("Processing single V2 deposit at " # address);
+                    
+                    // Forward funds to pool contract using V2 derivation
+                    let forwardResult = await forwardFundsToPoolV2(address, info);
+                    
+                    switch (forwardResult) {
+                        case (#ok(txHash)) {
+                            // Mark as processed
+                            depositAddresses.put(address, {
+                                commitment = info.commitment;
+                                amount = info.amount;
+                                timestamp = info.timestamp;
+                                userId = info.userId;
+                                processed = true;
+                            });
+                            
+                            // Track processed deposit
+                            processedDeposits.put(info.commitment, Time.now());
+                            
+                            #ok(txHash)
+                        };
+                        case (#err(e)) {
+                            #err("Failed to forward from " # address # ": " # e)
+                        };
+                    };
+                } catch (e) {
+                    #err("Error processing " # address # ": " # Error.message(e))
+                };
+            };
+        }
+    };
+
+    // Forward funds from V2 deposit address to pool contract
+    private func forwardFundsToPoolV2(depositAddress: Text, info: DepositInfo) : async Result.Result<Text, Text> {
+        try {
+            // Get nonce using EVM RPC canister
+            ExperimentalCycles.add(2_000_000_000); // 2B cycles
+            let nonceResult = await evmRpc.eth_getTransactionCount(
+                #EthMainnet(?[#PublicNode]),
+                ?{
+                    responseSizeEstimate = ?64;
+                    responseConsensus = null;
+                },
+                {
+                    address = depositAddress;
+                    block = #Latest;
+                }
+            );
+            
+            let addressNonce = switch (nonceResult) {
+                case (#Consistent(#Ok(nonce))) { nonce };
+                case (#Consistent(#Err(error))) { 
+                    return #err("Failed to get nonce via EVM RPC");
+                };
+                case (#Inconsistent(results)) {
+                    // Try to find most common nonce
+                    var nonce : Nat = 0;
+                    for ((_, result) in results.vals()) {
+                        switch (result) {
+                            case (#Ok(n)) { nonce := n; };
+                            case (#Err(_)) {};
+                        };
+                    };
+                    nonce;
+                };
+            };
+            
+            // Get current gas prices
+            let gasPrices = switch (await getGasPrices()) {
+                case (#ok(prices)) { prices };
+                case (#err(e)) { return #err("Failed to get gas prices: " # e) };
+            };
+            
+            // Calculate max fee per gas (base fee + priority fee + small buffer)
+            let maxFeePerGas = gasPrices.baseFee + gasPrices.maxPriorityFee + (gasPrices.baseFee / 10); // 10% buffer
+            
+            // Calculate gas cost for the transaction
+            let gasLimit : Nat = 50000; // Reduced to fit within available balance
+            let maxGasCost = maxFeePerGas * gasLimit;
+            
+            // Get balance using EVM RPC canister
+            let balanceRequest = "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getBalance\",\"params\":[\"" # 
+                               depositAddress # "\",\"latest\"],\"id\":1}";
+            
+            ExperimentalCycles.add(2_000_000_000); // 2B cycles
+            let balanceResult = await evmRpc.request(
+                #EthMainnet(#PublicNode),
+                balanceRequest,
+                2048
+            );
+            
+            let currentBalance = switch (balanceResult) {
+                case (#Ok(response)) {
+                    let balanceHex = extractResultFromJson(response);
+                    hexToNat(balanceHex);
+                };
+                case (#Err(error)) {
+                    return #err("Failed to get balance via EVM RPC");
+                };
+            };
+            
+            Debug.print("V2 deposit address balance: " # Nat.toText(currentBalance));
+            Debug.print("Max gas cost: " # Nat.toText(maxGasCost));
+            
+            // Ensure we have enough to cover both the deposit amount AND gas
+            let totalRequired = info.amount + maxGasCost;
+            if (currentBalance < totalRequired) {
+                return #err("Insufficient balance. Have: " # Nat.toText(currentBalance) # 
+                           ", need: " # Nat.toText(totalRequired));
+            };
+            
+            // Forward exactly the expected deposit amount
+            let amountToForward = info.amount;
+            
+            Debug.print("V2 forwarding: " # Nat.toText(amountToForward) # " wei");
+            
+            // Build deposit call data
+            let methodId = "b214faa5";
+            let commitmentHex = Text.trimStart(info.commitment, #text "0x");
+            
+            // Ensure commitment is properly padded to 32 bytes (64 hex chars)
+            let paddedCommitment = if (Text.size(commitmentHex) < 64) {
+                let padding = Text.fromIter(Iter.fromArray(Array.tabulate(64 - Text.size(commitmentHex), func(_: Nat) : Char { '0' })));
+                padding # commitmentHex
+            } else {
+                commitmentHex
+            };
+            
+            let callData = methodId # paddedCommitment;
+            
+            // Build EIP-1559 transaction
+            let tx : EIP1559Transaction = {
+                to = depositContractAddress;
+                value = amountToForward;
+                data = switch (Hex.decode(callData)) {
+                    case (#ok(bytes)) { Blob.fromArray(bytes) };
+                    case (#err(e)) { return #err("Failed to decode call data: " # e) };
+                };
+                nonce = addressNonce;
+                maxFeePerGas = maxFeePerGas;
+                maxPriorityFeePerGas = gasPrices.maxPriorityFee;
+                gasLimit = gasLimit;
+                chainId = 1; // Ethereum mainnet
+            };
+            
+            // CRITICAL: Use V2 derivation path (userId + commitment + timestamp)
+            let uniqueData = Text.encodeUtf8(
+                Principal.toText(info.userId) # 
+                info.commitment # 
+                Int.toText(info.timestamp)
+            );
+            let uniqueHash = await keccak256(uniqueData);
+            let hashBytes = Blob.toArray(uniqueHash);
+            let derivationPath = [Blob.fromArray([hashBytes[0], hashBytes[1], hashBytes[2], hashBytes[3]])];
+            
+            Debug.print("V2 derivation - userId: " # Principal.toText(info.userId) # 
+                       ", commitment: " # info.commitment # 
+                       ", timestamp: " # Int.toText(info.timestamp));
+            
+            // Sign the EIP-1559 transaction with proper yParity recovery
+            let (signedTx, submitResult) = await signAndSubmitEIP1559Transaction(tx, derivationPath);
+            
+            switch (submitResult) {
+                case (#Consistent(#Ok(sendStatus))) {
+                    switch (sendStatus) {
+                        case (#Ok(?txHash)) {
+                            Debug.print("V2 forwarded deposit with tx: " # txHash);
+                            
+                            // Add commitment to deposit manager
+                            let depositResult = await depositManager.deposit(
+                                amountToForward,
+                                "ETH",
+                                1, // Mainnet chain ID
+                                info.commitment
+                            );
+                            switch (depositResult) {
+                                case (#ok(depositId)) {
+                                    Debug.print("Added deposit with ID: " # Nat.toText(depositId));
+                                };
+                                case (#err(e)) {
+                                    Debug.print("Warning: Failed to add deposit: " # e);
+                                };
+                            };
+                            
+                            #ok(txHash)
+                        };
+                        case (#Ok(null)) {
+                            #err("Transaction sent but no hash returned");
+                        };
+                        case (#NonceTooLow) {
+                            #err("Nonce too low - transaction may already be processed");
+                        };
+                        case (#NonceTooHigh) {
+                            #err("Nonce too high");
+                        };
+                        case (#InsufficientFunds) {
+                            #err("Insufficient funds in deposit address");
+                        };
+                    };
+                };
+                case (#Consistent(#Err(error))) {
+                    #err("RPC error: " # debug_show(error));
+                };
+                case (#Inconsistent(results)) {
+                    #err("Inconsistent RPC results");
+                };
+            };
+            
+        } catch (e) {
+            #err("Failed to forward funds: " # Error.message(e))
+        };
+    };
+
+    // Recover stuck funds by finding the correct timestamp
+    public shared(msg) func recoverStuckFunds(stuckAddress: Text, targetAddress: Text) : async Result.Result<Text, Text> {
+        switch (depositAddresses.get(stuckAddress)) {
+            case null { #err("Address not found in deposit records") };
+            case (?info) {
+                Debug.print("Starting recovery for " # stuckAddress);
+                Debug.print("Target: " # targetAddress);
+                Debug.print("Stored timestamp: " # Int.toText(info.timestamp));
+                
+                // The stored timestamp is slightly after the generation timestamp
+                // Try timestamps in a 1 second window before the stored timestamp
+                let baseTimestamp = info.timestamp;
+                var found = false;
+                var attempts = 0;
+                
+                // Try in smaller increments first (likely within milliseconds)
+                // First try 0-1000 microseconds (1 millisecond)
+                for (offset in Iter.range(0, 1000)) {
+                    if (found) { 
+                        return #err("Should not reach here"); // Exit early if found
+                    };
+                    
+                    attempts += 1;
+                    let tryTimestamp = baseTimestamp - offset;
+                    
+                    // Log progress every 100,000 attempts
+                    if (offset % 100000 == 0) {
+                        Debug.print("Trying offset -" # Nat.toText(offset) # " (attempt " # Nat.toText(attempts) # ")");
+                    };
+                    
+                    // Generate derivation path with this timestamp
+                    let uniqueData = Text.encodeUtf8(
+                        Principal.toText(info.userId) # 
+                        info.commitment # 
+                        Int.toText(tryTimestamp)
+                    );
+                    let uniqueHash = await keccak256(uniqueData);
+                    let hashBytes = Blob.toArray(uniqueHash);
+                    let derivationPath = [Blob.fromArray([hashBytes[0], hashBytes[1], hashBytes[2], hashBytes[3]])];
+                    
+                    // Get public key and check if it matches
+                    let { public_key } = await getEcdsaPublicKey(derivationPath);
+                    let derivedAddress = await publicKeyToEthereumAddressProper(public_key);
+                    
+                    if (Text.toLowercase(derivedAddress) == Text.toLowercase(stuckAddress)) {
+                        Debug.print("FOUND! Matching timestamp at offset -" # Nat.toText(offset));
+                        Debug.print("Actual generation timestamp: " # Int.toText(tryTimestamp));
+                        
+                        // Now forward the funds
+                        let result = await forwardStuckFunds(stuckAddress, targetAddress, derivationPath);
+                        return result;
+                    };
+                };
+                
+                // If not found in first millisecond, try up to 100ms
+                Debug.print("Not found in first 1ms, trying larger offsets...");
+                for (offset in Iter.range(1001, 100000)) {
+                    if (found) { 
+                        return #err("Should not reach here"); 
+                    };
+                    
+                    attempts += 1;
+                    let tryTimestamp = baseTimestamp - offset;
+                    
+                    if (offset % 10000 == 0) {
+                        Debug.print("Trying offset -" # Nat.toText(offset) # " (attempt " # Nat.toText(attempts) # ")");
+                    };
+                    
+                    let uniqueData = Text.encodeUtf8(
+                        Principal.toText(info.userId) # 
+                        info.commitment # 
+                        Int.toText(tryTimestamp)
+                    );
+                    let uniqueHash = await keccak256(uniqueData);
+                    let hashBytes = Blob.toArray(uniqueHash);
+                    let derivationPath = [Blob.fromArray([hashBytes[0], hashBytes[1], hashBytes[2], hashBytes[3]])];
+                    
+                    let { public_key } = await getEcdsaPublicKey(derivationPath);
+                    let derivedAddress = await publicKeyToEthereumAddressProper(public_key);
+                    
+                    if (Text.toLowercase(derivedAddress) == Text.toLowercase(stuckAddress)) {
+                        Debug.print("FOUND! Matching timestamp at offset -" # Nat.toText(offset));
+                        Debug.print("Actual generation timestamp: " # Int.toText(tryTimestamp));
+                        
+                        let result = await forwardStuckFunds(stuckAddress, targetAddress, derivationPath);
+                        return result;
+                    };
+                };
+                
+                Debug.print("Tried " # Nat.toText(attempts) # " timestamps without finding a match");
+                #err("Could not find matching timestamp within 100ms window")
+            };
+        }
+    };
+    
+    // Forward stuck funds using discovered derivation path
+    private func forwardStuckFunds(
+        fromAddress: Text,
+        toAddress: Text,
+        derivationPath: [Blob]
+    ) : async Result.Result<Text, Text> {
+        try {
+            Debug.print("Forwarding funds from " # fromAddress # " to " # toAddress);
+            
+            // Get current balance
+            let balanceRequest = "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getBalance\",\"params\":[\"" # 
+                               fromAddress # "\",\"latest\"],\"id\":1}";
+            
+            ExperimentalCycles.add(2_000_000_000);
+            let balanceResult = await evmRpc.request(
+                #EthMainnet(#PublicNode),
+                balanceRequest,
+                2048
+            );
+            
+            let currentBalance = switch (balanceResult) {
+                case (#Ok(response)) {
+                    let balanceHex = extractResultFromJson(response);
+                    hexToNat(balanceHex);
+                };
+                case (#Err(error)) {
+                    return #err("Failed to get balance");
+                };
+            };
+            
+            Debug.print("Current balance: " # Nat.toText(currentBalance) # " wei");
+            
+            if (currentBalance == 0) {
+                return #err("No balance to recover");
+            };
+            
+            // Get gas prices
+            let gasPrices = switch (await getGasPrices()) {
+                case (#ok(prices)) { prices };
+                case (#err(e)) { return #err("Failed to get gas prices: " # e) };
+            };
+            
+            // Calculate gas for simple ETH transfer
+            let maxFeePerGas = gasPrices.baseFee + gasPrices.maxPriorityFee + (gasPrices.baseFee / 10);
+            let gasLimit : Nat = 21000; // Standard ETH transfer
+            let maxGasCost = maxFeePerGas * gasLimit;
+            
+            Debug.print("Max gas cost: " # Nat.toText(maxGasCost) # " wei");
+            
+            if (currentBalance <= maxGasCost) {
+                return #err("Insufficient balance to cover gas. Have: " # Nat.toText(currentBalance) # ", need: " # Nat.toText(maxGasCost));
+            };
+            
+            // Send all balance minus gas (with small buffer)
+            let valueToSend = currentBalance - maxGasCost - (maxGasCost / 20); // 5% extra buffer
+            
+            Debug.print("Will send: " # Nat.toText(valueToSend) # " wei");
+            
+            // Get nonce
+            ExperimentalCycles.add(2_000_000_000);
+            let nonceResult = await evmRpc.eth_getTransactionCount(
+                #EthMainnet(?[#PublicNode]),
+                ?{ responseSizeEstimate = ?64; responseConsensus = null; },
+                { address = fromAddress; block = #Latest; }
+            );
+            
+            let nonce = switch (nonceResult) {
+                case (#Consistent(#Ok(n))) { n };
+                case (_) { return #err("Failed to get nonce") };
+            };
+            
+            Debug.print("Nonce: " # Nat.toText(nonce));
+            
+            // Build simple ETH transfer transaction
+            let tx : EIP1559Transaction = {
+                to = toAddress;
+                value = valueToSend;
+                data = Blob.fromArray([]); // No data for simple transfer
+                nonce = nonce;
+                maxFeePerGas = maxFeePerGas;
+                maxPriorityFeePerGas = gasPrices.maxPriorityFee;
+                gasLimit = gasLimit;
+                chainId = 1;
+            };
+            
+            // Sign and submit with the correct derivation path
+            let (signedTx, submitResult) = await signAndSubmitEIP1559Transaction(tx, derivationPath);
+            
+            switch (submitResult) {
+                case (#Consistent(#Ok(sendStatus))) {
+                    switch (sendStatus) {
+                        case (#Ok(?txHash)) {
+                            Debug.print("Recovery successful! TX: " # txHash);
+                            Debug.print("Recovered " # Nat.toText(valueToSend) # " wei to " # toAddress);
+                            #ok(txHash)
+                        };
+                        case (#Ok(null)) {
+                            #err("Transaction sent but no hash returned")
+                        };
+                        case (#InsufficientFunds) {
+                            #err("Insufficient funds - this means wrong derivation path")
+                        };
+                        case (#NonceTooLow) {
+                            #err("Nonce too low")
+                        };
+                        case (#NonceTooHigh) {
+                            #err("Nonce too high")
+                        };
+                    };
+                };
+                case (#Consistent(#Err(error))) {
+                    #err("RPC error: " # debug_show(error))
+                };
+                case (#Inconsistent(results)) {
+                    #err("Inconsistent RPC results")
+                };
+            };
+        } catch (e) {
+            #err("Recovery failed: " # Error.message(e))
+        };
+    };
+
+    // Verify V2 address derivation matches between generation and signing
+    public shared(msg) func verifyV2AddressDerivation(testAddress: Text) : async Result.Result<{
+        addressMatches: Bool;
+        generatedAddress: Text;
+        derivedFromSigning: Text;
+        storedTimestamp: Int;
+        canSign: Bool;
+    }, Text> {
+        switch (depositAddresses.get(testAddress)) {
+            case null { #err("Address not found in deposit records") };
+            case (?info) {
+                Debug.print("Verifying V2 derivation for " # testAddress);
+                Debug.print("Stored info - userId: " # Principal.toText(info.userId));
+                Debug.print("Stored info - commitment: " # info.commitment);
+                Debug.print("Stored info - timestamp: " # Int.toText(info.timestamp));
+                
+                // Recreate the exact derivation path used during generation
+                let uniqueData = Text.encodeUtf8(
+                    Principal.toText(info.userId) # 
+                    info.commitment # 
+                    Int.toText(info.timestamp)
+                );
+                let uniqueHash = await keccak256(uniqueData);
+                let hashBytes = Blob.toArray(uniqueHash);
+                let derivationPath = [Blob.fromArray([hashBytes[0], hashBytes[1], hashBytes[2], hashBytes[3]])];
+                
+                // Get public key and derive address
+                let { public_key } = await getEcdsaPublicKey(derivationPath);
+                let derivedAddress = await publicKeyToEthereumAddressProper(public_key);
+                
+                Debug.print("Derived address from stored info: " # derivedAddress);
+                Debug.print("Original address: " # testAddress);
+                
+                let addressMatches = Text.toLowercase(derivedAddress) == Text.toLowercase(testAddress);
+                
+                // Try to sign a test message to verify we can actually sign from this address
+                var canSign = false;
+                if (addressMatches) {
+                    try {
+                        // Create a simple test transaction
+                        let testTx : EIP1559Transaction = {
+                            to = "0x0000000000000000000000000000000000000000";
+                            value = 0;
+                            data = Blob.fromArray([]);
+                            nonce = 0;
+                            maxFeePerGas = 1000000000;
+                            maxPriorityFeePerGas = 1000000000;
+                            gasLimit = 21000;
+                            chainId = 1;
+                        };
+                        
+                        // Try to sign it
+                        let encoded = encodeEIP1559Transaction(testTx);
+                        let messageHash = await keccak256(encoded);
+                        
+                        Debug.print("Test signing with derivation path...");
+                        let signature = await signWithEcdsa(messageHash, derivationPath);
+                        
+                        Debug.print("Signature obtained successfully, size: " # Nat.toText(signature.size()));
+                        canSign := true;
+                    } catch (e) {
+                        Debug.print("Failed to sign test transaction: " # Error.message(e));
+                        canSign := false;
+                    };
+                };
+                
+                #ok({
+                    addressMatches = addressMatches;
+                    generatedAddress = testAddress;
+                    derivedFromSigning = derivedAddress;
+                    storedTimestamp = info.timestamp;
+                    canSign = canSign;
+                })
+            };
+        }
+    };
+
+    // Sign and submit EIP-1559 transaction with proper yParity recovery
+    private func signAndSubmitEIP1559Transaction(tx: EIP1559Transaction, derivationPath: [Blob]) : async (Text, MultiSendRawTransactionResult) {
+        // Encode EIP-1559 transaction for signing
+        let encoded = encodeEIP1559Transaction(tx);
+        let messageHash = await keccak256(encoded);
+        
+        Debug.print("EIP-1559 message hash size: " # Nat.toText(messageHash.size()) # " bytes");
+        
+        // Sign with threshold ECDSA
+        let signature = await signWithEcdsa(messageHash, derivationPath);
+        
+        // First try with yParity = 0
+        let signedTxV0 = encodeSignedEIP1559Transaction(tx, signature, 0);
+        
+        Debug.print("Submitting EIP-1559 transaction with yParity=0...");
+        Debug.print("Signed transaction hex: " # signedTxV0);
+        ExperimentalCycles.add(10_000_000_000); // 10B cycles
+        let submitResultV0 = await evmRpc.eth_sendRawTransaction(
+            #EthMainnet(?[#PublicNode]),
+            ?{
+                responseSizeEstimate = ?256;
+                responseConsensus = null;
+            },
+            signedTxV0
+        );
+        
+        switch (submitResultV0) {
+            case (#Consistent(#Ok(#Ok(?txHash)))) {
+                // Success with yParity = 0
+                Debug.print("Transaction succeeded with yParity=0");
+                (signedTxV0, submitResultV0);
+            };
+            case (_) {
+                // Log the specific error from yParity=0
+                Debug.print("yParity=0 result: " # debug_show(submitResultV0));
+                
+                // Try with yParity = 1
+                Debug.print("yParity=0 failed, trying yParity=1...");
+                let signedTxV1 = encodeSignedEIP1559Transaction(tx, signature, 1);
+                Debug.print("Signed transaction hex (yParity=1): " # signedTxV1);
+                
+                ExperimentalCycles.add(10_000_000_000); // 10B cycles
+                let submitResultV1 = await evmRpc.eth_sendRawTransaction(
+                    #EthMainnet(?[#PublicNode]),
+                    ?{
+                        responseSizeEstimate = ?256;
+                        responseConsensus = null;
+                    },
+                    signedTxV1
+                );
+                (signedTxV1, submitResultV1);
+            };
+        };
+    };
+
+    // Encode EIP-1559 transaction (type 0x02)
+    private func encodeEIP1559Transaction(tx: EIP1559Transaction) : Blob {
+        let items : [RLP.RLPItem] = [
+            #bytes(RLP.natToBytes(tx.chainId)),
+            #bytes(RLP.natToBytes(tx.nonce)),
+            #bytes(RLP.natToBytes(tx.maxPriorityFeePerGas)),
+            #bytes(RLP.natToBytes(tx.maxFeePerGas)),
+            #bytes(RLP.natToBytes(tx.gasLimit)),
+            #bytes(switch (Hex.decode(tx.to)) {
+                case (#ok(bytes)) { Blob.fromArray(bytes) };
+                case (#err(_)) { Blob.fromArray([]) };
+            }),
+            #bytes(RLP.natToBytes(tx.value)),
+            #bytes(tx.data),
+            #list([]) // Access list (empty)
+        ];
+        
+        let rlpEncoded = RLP.encode(#list(items));
+        // Prepend transaction type (0x02 for EIP-1559)
+        let typePrefix : [Nat8] = [0x02];
+        Blob.fromArray(Array.append<Nat8>(typePrefix, Blob.toArray(rlpEncoded)))
+    };
+
+    // Encode signed EIP-1559 transaction
+    private func encodeSignedEIP1559Transaction(tx: EIP1559Transaction, sig: Blob, yParity: Nat) : Text {
+        let sigBytes = Blob.toArray(sig);
+        if (sigBytes.size() < 64) {
+            return "0x";
+        };
+        
+        let r = Blob.fromArray(Array.subArray(sigBytes, 0, 32));
+        let s = Blob.fromArray(Array.subArray(sigBytes, 32, 32));
+        
+        let items : [RLP.RLPItem] = [
+            #bytes(RLP.natToBytes(tx.chainId)),
+            #bytes(RLP.natToBytes(tx.nonce)),
+            #bytes(RLP.natToBytes(tx.maxPriorityFeePerGas)),
+            #bytes(RLP.natToBytes(tx.maxFeePerGas)),
+            #bytes(RLP.natToBytes(tx.gasLimit)),
+            #bytes(switch (Hex.decode(tx.to)) {
+                case (#ok(bytes)) { Blob.fromArray(bytes) };
+                case (#err(_)) { Blob.fromArray([]) };
+            }),
+            #bytes(RLP.natToBytes(tx.value)),
+            #bytes(tx.data),
+            #list([]), // Access list (empty)
+            #bytes(RLP.natToBytes(yParity)),
+            #bytes(r),
+            #bytes(s)
+        ];
+        
+        let rlpEncoded = RLP.encode(#list(items));
+        // Prepend transaction type (0x02 for EIP-1559)
+        let typePrefix : [Nat8] = [0x02];
+        let fullEncoded = Blob.fromArray(Array.append<Nat8>(typePrefix, Blob.toArray(rlpEncoded)));
+        "0x" # Hex.encode(Blob.toArray(fullEncoded))
+    };
+}

@@ -90,8 +90,8 @@ Solana ←→ Solana Adapter ←→ Pattern Breaker
 - [ ] Day 6-7: Testing on Bitcoin testnet
 
 ### Week 2: Ethereum Integration
-- [ ] Day 1-2: Ethereum adapter canister setup
-- [ ] Day 3-4: Smart contract event monitoring
+- [x] Day 1-2: Ethereum adapter canister setup (Structure defined)
+- [x] Day 3-4: Smart contract implementation (EthereumDepositPool.sol completed)
 - [ ] Day 5: Withdrawal execution via HTTPS outcalls
 - [ ] Day 6-7: Testing on Sepolia testnet
 

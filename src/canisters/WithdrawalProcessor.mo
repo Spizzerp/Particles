@@ -22,6 +22,14 @@ actor WithdrawalProcessor {
     // PLONK verifier canister reference
     private let plonkVerifier : PlonkIntegration.PlonkVerifier = actor(PlonkIntegration.PLONK_VERIFIER_CANISTER);
     
+    // Ethereum adapter for executing withdrawals
+    private let ethereumAdapter : actor {
+        getPoolAddress : () -> async Result.Result<Text, Text>;
+        getDepositContract : () -> async Text;
+        sendWithdrawal : (Text, Nat, Text) -> async Result.Result<Text, Text>;
+        getCurrentMerkleRoot : () -> async Result.Result<Text, Text>;
+    } = actor("55iy2-vaaaa-aaaas-amn7a-cai"); // ethereum_adapter_fixed on IC
+    
     // Store the PLONK verification key (loaded at init)
     private stable var plonkVkBytes : [Nat8] = [];
     
@@ -70,6 +78,19 @@ actor WithdrawalProcessor {
                 let withdrawalId = nextWithdrawalId;
                 nextWithdrawalId += 1;
                 
+                // First verify the merkle root matches current state
+                let currentRootResult = await ethereumAdapter.getCurrentMerkleRoot();
+                switch (currentRootResult) {
+                    case (#err(e)) {
+                        return #err("Failed to get current merkle root: " # e);
+                    };
+                    case (#ok(currentRoot)) {
+                        if (currentRoot != merkleRoot) {
+                            return #err("Invalid merkle root. Expected: " # currentRoot # ", got: " # merkleRoot);
+                        };
+                    };
+                };
+                
                 // Create withdrawal with PLONK proof
                 let newWithdrawal : Types.Withdrawal = {
                     id = withdrawalId;
@@ -98,7 +119,31 @@ actor WithdrawalProcessor {
                         pendingWithdrawals.put(withdrawalId, newWithdrawal);
                         nullifierSet.put(nullifier, true);
                         
-                        #ok(withdrawalId)
+                        // Execute the withdrawal on Ethereum
+                        let ethResult = await executeEthereumWithdrawal(
+                            recipient,
+                            amount,
+                            nullifier
+                        );
+                        
+                        switch (ethResult) {
+                            case (#ok(txHash)) {
+                                // Update withdrawal with transaction hash
+                                let updatedWithdrawal = {
+                                    newWithdrawal with
+                                    id = withdrawalId;
+                                };
+                                withdrawals.put(withdrawalId, updatedWithdrawal);
+                                processedWithdrawals.put(withdrawalId, updatedWithdrawal);
+                                pendingWithdrawals.delete(withdrawalId);
+                                
+                                #ok(withdrawalId)
+                            };
+                            case (#err(e)) {
+                                // Keep withdrawal as pending if Ethereum tx fails
+                                #err("Withdrawal verified but Ethereum transaction failed: " # e)
+                            };
+                        }
                     };
                     case (#ok(false)) {
                         #err("Invalid PLONK proof")
@@ -211,6 +256,16 @@ actor WithdrawalProcessor {
         };
         
         "0x" # hex
+    };
+    
+    // Execute withdrawal on Ethereum
+    private func executeEthereumWithdrawal(
+        recipient: Text,
+        amount: Nat,
+        nullifierHash: Text
+    ) : async Result.Result<Text, Text> {
+        // Call Ethereum adapter to process withdrawal
+        await ethereumAdapter.sendWithdrawal(recipient, amount, nullifierHash)
     };
     
     // Convert PLONK proof to legacy ZKProof type for compatibility

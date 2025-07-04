@@ -1,0 +1,34 @@
+#!/bin/bash
+
+echo "🧪 Testing Fixed EVM RPC on IC Mainnet..."
+
+# Mainnet canister ID
+CANISTER_ID="icmw4-miaaa-aaaad-qhmmq-cai"
+NETWORK="ic"
+
+# Set deposit contract address
+echo -e "\n1️⃣ Setting deposit contract address..."
+dfx canister call $CANISTER_ID setDepositContract '("0x9b0721C174b103facEC1EeE435679Ae9C493163C")' --network $NETWORK
+
+# Get pool address
+echo -e "\n2️⃣ Getting pool address..."
+dfx canister call $CANISTER_ID getPoolAddress --network $NETWORK
+
+# Check deposits
+echo -e "\n3️⃣ Checking for deposits..."
+dfx canister call $CANISTER_ID checkDeposits --network $NETWORK
+
+# Test withdrawal (with test data)
+echo -e "\n4️⃣ Testing withdrawal processing..."
+RECIPIENT="0x742d35Cc6634C0532925a3b844Bc9e7595f7F1eD"  # Test address
+AMOUNT="100000000000000000"  # 0.1 ETH in wei
+NULLIFIER="0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+
+echo "Testing withdrawal to: $RECIPIENT"
+echo "Amount: $AMOUNT wei (0.1 ETH)"
+
+dfx canister call $CANISTER_ID processWithdrawal \
+  "(\"$RECIPIENT\", $AMOUNT, \"$NULLIFIER\")" \
+  --network $NETWORK
+
+echo -e "\n✅ Test complete"

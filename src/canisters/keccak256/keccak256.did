@@ -1,0 +1,14 @@
+type HashRequest = record {
+  data : blob;
+};
+
+type HashResponse = record {
+  hash : blob;
+};
+
+service : {
+  keccak256 : (HashRequest) -> (HashResponse);
+  keccak256_hex : (HashRequest) -> (text);
+  health : () -> (text) query;
+  version : () -> (text) query;
+}

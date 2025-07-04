@@ -1,7 +1,7 @@
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
 import { Principal } from '@dfinity/principal';
-import { generateWithdrawalProof as generateSNARKProof, prepareWithdrawalInputs, generateNullifierHash } from './snarkProof';
+import { plonkProverService } from './plonkProverService';
 
 export interface WithdrawalProof {
   nullifier: string;
@@ -11,11 +11,14 @@ export interface WithdrawalProof {
   recipient: string;
   amount: string;
   chainId: string;
-  // In a real implementation, this would include the actual ZK proof
+  // PLONK proof format
   proof: {
-    a: string;
-    b: string;
-    c: string;
+    lro: [string, string][];
+    z: [string, string];
+    h1: [string, string];
+    h2: [string, string];
+    wire_values_at_z: string[];
+    wire_values_at_z_omega: string[];
   };
 }
 
@@ -53,52 +56,47 @@ export function parseDepositData(input: string): DepositData | null {
 }
 
 /**
- * Generate a withdrawal proof using SNARKs
+ * Generate a withdrawal proof using PLONK
  */
 export async function generateWithdrawalProof(
   depositData: DepositData,
   recipient: string,
   merkleRoot: string,
-  merkleProof: string[]
+  merkleProof: string[],
+  leafIndex?: number
 ): Promise<WithdrawalProof> {
-  // Generate nullifier from secret (should match deposit)
-  const secretBytes = hexToBytes(depositData.secret);
-  const nullifierBytes = sha256(secretBytes);
-  const nullifier = bytesToHex(nullifierBytes);
-  
-  // Verify nullifier matches
-  if (nullifier !== depositData.nullifier) {
-    throw new Error('Invalid secret: nullifier mismatch');
+  // Ensure PLONK prover is initialized
+  if (!plonkProverService.isInitialized()) {
+    console.log('Initializing PLONK prover...');
+    await plonkProverService.initialize();
   }
   
-  // Prepare inputs for the circuit
-  const circuitInputs = prepareWithdrawalInputs(
-    {
-      nullifier: depositData.nullifier,
-      secret: depositData.secret,
-      amount: depositData.amount,
-      chainId: depositData.chain
-    },
+  // Generate nullifier hash from nullifier
+  const nullifierHash = depositData.nullifier; // Already a hash from deposit
+  
+  // Use leaf index from deposit ID if not provided
+  const index = leafIndex !== undefined ? leafIndex : parseInt(depositData.depositId, 10);
+  
+  // Generate the PLONK proof
+  const generatedProof = await plonkProverService.generateWithdrawalProof(
+    depositData.secret,
+    depositData.nullifier,
+    depositData.amount,
     recipient,
     merkleRoot,
-    merkleProof
+    merkleProof,
+    index
   );
   
-  // Generate the SNARK proof
-  const { proof: snarkProof, publicSignals } = await generateSNARKProof(circuitInputs);
-  
-  // The proof is already in the correct format from our service
-  const proof = snarkProof;
-  
   return {
-    nullifier,
+    nullifier: nullifierHash,
     commitment: depositData.commitment,
     merkleRoot,
     merkleProof,
     recipient,
     amount: depositData.amount,
     chainId: depositData.chain,
-    proof
+    proof: generatedProof.proof
   };
 }
 

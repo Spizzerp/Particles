@@ -3,12 +3,10 @@ import { Actor, HttpAgent } from '@dfinity/agent';
 import { Principal } from '@dfinity/principal';
 import { idlFactory as depositManagerIDL } from '../declarations/deposit_manager';
 import { idlFactory as withdrawalProcessorIDL } from '../declarations/withdrawal_processor';
-import { idlFactory as cryptoComponentsIDL } from '../declarations/crypto_components';
 
 const canisterIds = {
   depositManager: 'bd3sg-teaaa-aaaaa-qaaba-cai',
-  withdrawalProcessor: 'b77ix-eeaaa-aaaaa-qaada-cai',
-  cryptoComponents: 'bkyz2-fmaaa-aaaaa-qaaaq-cai'
+  withdrawalProcessor: 'b77ix-eeaaa-aaaaa-qaada-cai'
 };
 
 export const useActors = () => {
@@ -40,15 +38,9 @@ export const useActors = () => {
           canisterId: Principal.fromText(canisterIds.withdrawalProcessor)
         });
 
-        const cryptoComponents = Actor.createActor(cryptoComponentsIDL, {
-          agent,
-          canisterId: Principal.fromText(canisterIds.cryptoComponents)
-        });
-
         setActors({
           depositManager,
-          withdrawalProcessor,
-          cryptoComponents
+          withdrawalProcessor
         });
       } catch (error) {
         console.error('Error initializing actors:', error);

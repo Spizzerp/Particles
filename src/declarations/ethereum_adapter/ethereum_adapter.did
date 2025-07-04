@@ -1,0 +1,73 @@
+type Result_5 = 
+ variant {
+   err: text;
+   ok: vec DepositEvent;
+ };
+type Result_4 = 
+ variant {
+   err: text;
+   ok: record {
+         address: text;
+         publicKey: text;
+       };
+ };
+type Result_3 = 
+ variant {
+   err: text;
+   ok: vec text;
+ };
+type Result_2 = 
+ variant {
+   err: text;
+   ok;
+ };
+type Result_1 = 
+ variant {
+   err: text;
+   ok: nat;
+ };
+type Result = 
+ variant {
+   err: text;
+   ok: text;
+ };
+type DepositInfo = 
+ record {
+   amount: nat;
+   commitment: text;
+   processed: bool;
+   timestamp: int;
+   userId: principal;
+ };
+type DepositEvent = 
+ record {
+   amount: nat;
+   blockNumber: nat;
+   commitment: text;
+   sender: text;
+   timestamp: int;
+   txHash: text;
+ };
+service : {
+  checkDeposits: () -> (Result_5);
+  debugAddressGeneration: (principal) -> (Result_4);
+  getCurrentMerkleRoot: () -> (Result);
+  getDepositAddress: (principal, text, nat) -> (Result);
+  getDepositContract: () -> (text) query;
+  getDepositInfo: (text) -> (opt DepositInfo) query;
+  getKeccak256CanisterId: () -> (text) query;
+  getPendingDeposits: () -> (vec record {
+                                   text;
+                                   DepositInfo;
+                                 }) query;
+  getPoolAddress: () -> (text);
+  processDepositAddresses: () -> (Result_3);
+  processSingleDeposit: (text) -> (Result);
+  processSingleDepositEIP1559: (text) -> (Result);
+  setDepositContract: (text) -> (Result_2);
+  setKeccak256CanisterId: (text) -> (Result_2);
+  testGetNonce: (text) -> (Result_1);
+  testRustForwarding: (text) -> (Result);
+  testRustForwardingEIP1559: (text) -> (Result);
+  testSimpleTransfer: (text) -> (Result);
+}
