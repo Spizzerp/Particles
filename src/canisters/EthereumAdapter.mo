@@ -1459,7 +1459,7 @@ actor EthereumAdapter {
                                 };
                                 
                                 let maxFeePerGas = gasPrices.baseFee + gasPrices.maxPriorityFee + (gasPrices.baseFee / 10);
-                                let gasLimit : Nat = 50000;
+                                let gasLimit : Nat = 80000;
                                 
                                 // Build transaction
                                 let methodId = "b214faa5";
@@ -1944,7 +1944,7 @@ actor EthereumAdapter {
             let maxFeePerGas = gasPrices.baseFee + gasPrices.maxPriorityFee + (gasPrices.baseFee / 10); // 10% buffer
             
             // Calculate gas cost for the transaction
-            let gasLimit : Nat = 50000; // Reduced to fit within available balance
+            let gasLimit : Nat = 80000; // Gas limit for deposit function call
             let maxGasCost = maxFeePerGas * gasLimit;
             
             // Get balance using EVM RPC canister
@@ -2192,6 +2192,46 @@ actor EthereumAdapter {
         }
     };
 
+    // Retry a failed V2 deposit (for debugging)
+    public shared(msg) func retryV2Deposit(address: Text) : async Result.Result<Text, Text> {
+        switch (depositAddresses.get(address)) {
+            case null { #err("Deposit address not found") };
+            case (?info) {
+                // Ensure deposit contract is set
+                if (depositContractAddress == "") {
+                    return #err("Deposit contract address not set");
+                };
+                
+                try {
+                    Debug.print("Retrying V2 deposit at " # address # " (ignoring processed flag)");
+                    
+                    // Forward funds to pool contract using V2 derivation
+                    let forwardResult = await forwardFundsToPoolV2(address, info);
+                    
+                    switch (forwardResult) {
+                        case (#ok(txHash)) {
+                            // Update processed status
+                            depositAddresses.put(address, {
+                                commitment = info.commitment;
+                                amount = info.amount;
+                                timestamp = info.timestamp;
+                                userId = info.userId;
+                                processed = true;
+                            });
+                            
+                            #ok(txHash)
+                        };
+                        case (#err(e)) {
+                            #err("Failed to forward from " # address # ": " # e)
+                        };
+                    };
+                } catch (e) {
+                    #err("Error processing " # address # ": " # Error.message(e))
+                };
+            };
+        }
+    };
+
     // Forward funds from V2 deposit address to pool contract
     private func forwardFundsToPoolV2(depositAddress: Text, info: DepositInfo) : async Result.Result<Text, Text> {
         try {
@@ -2237,7 +2277,7 @@ actor EthereumAdapter {
             let maxFeePerGas = gasPrices.baseFee + gasPrices.maxPriorityFee + (gasPrices.baseFee / 10); // 10% buffer
             
             // Calculate gas cost for the transaction
-            let gasLimit : Nat = 50000; // Reduced to fit within available balance
+            let gasLimit : Nat = 80000; // Gas limit for deposit function call
             let maxGasCost = maxFeePerGas * gasLimit;
             
             // Get balance using EVM RPC canister

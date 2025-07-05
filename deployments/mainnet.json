@@ -1,9 +1,9 @@
 {
   "network": "mainnet",
   "chainId": 1,
-  "address": "0x9b0721C174b103facEC1EeE435679Ae9C493163C",
-  "deployedAt": "2025-07-01T11:33:51.522Z",
+  "address": "0xe09A374Ac0Bc64061Ca839Cd3312e0d86E94Df51",
+  "deployedAt": "2025-07-05T09:05:41.228Z",
   "deployer": "0x92Ab98722Fe2651FABf40683e8E690e7802aEb2e",
-  "icpCanister": "0x92Ab98722Fe2651FABf40683e8E690e7802aEb2e",
-  "transactionHash": "0xdefc611d0d86a138d07b26f103b62a7391c2655f2ba8cd096a321a64ee3c8ace"
+  "icpCanister": "0xb012acfa53164ab5e8d302a22a22834702b1ca01",
+  "transactionHash": "0xfc60cf8b8126884fe135472aeb380874aea1aa53c4ab7d5bea9111c901451b63"
 }

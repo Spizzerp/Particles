@@ -1,0 +1,10 @@
+{
+  "address": "0x41ec8cf161e001444e8ca75d02e397d5b9d2a5ba",
+  "commitment": "0xd76c3af4ff52bfdd060dfb26ef1c932628d61f42612c1bef1c90b256bdefb045",
+  "principal": "aaaaa-aa",
+  "amountWei": "5000000000000000",
+  "amountEth": "0.005",
+  "network": "mainnet",
+  "contractAddress": "0xe09A374Ac0Bc64061Ca839Cd3312e0d86E94Df51",
+  "timestamp": "2025-07-05T11:23:53.527Z"
+}

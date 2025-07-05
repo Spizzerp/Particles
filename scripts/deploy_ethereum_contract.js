@@ -58,9 +58,8 @@ async function deployContract() {
     // Deploy contract
     console.log('Deploying contract...');
     
-    // For now, use deployer address as ICP canister placeholder
-    // In production, this should be the derived address from threshold ECDSA
-    const icpCanisterAddress = wallet.address; // TODO: Replace with actual ICP-derived address
+    // ICP canister's derived Ethereum address from threshold ECDSA
+    const icpCanisterAddress = '0xb012acfa53164ab5e8d302a22a22834702b1ca01';
     
     const factory = new ethers.ContractFactory(
         contractJson.abi,
@@ -103,7 +102,7 @@ async function deployContract() {
     
     // Verify accepted amounts
     console.log('\nVerifying contract configuration...');
-    const amounts = [0.1, 1, 10, 100];
+    const amounts = [0.005, 0.01, 0.1, 1, 10, 100];
     for (let i = 0; i < amounts.length; i++) {
         const acceptedAmount = await contract.acceptedAmounts(i);
         console.log(`Accepted amount ${i}: ${ethers.formatEther(acceptedAmount)} ETH`);

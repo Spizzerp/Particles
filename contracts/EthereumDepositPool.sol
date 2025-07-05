@@ -23,6 +23,7 @@ contract EthereumDepositPool {
     
     // Accepted deposit amounts (in wei)
     uint256[] public acceptedAmounts = [
+        0.005 ether, // Minimal amount for mainnet testing
         0.01 ether,  // Added for testing
         0.1 ether,
         1 ether,
