@@ -27,7 +27,9 @@ export interface DepositData {
   commitment: string;
   secret: string;
   nullifier: string;
+  nullifierHash?: string;
   amount: string;
+  amountWei?: string; // Amount in smallest unit (wei) used for commitment
   token: string;
   chain: string;
 }
@@ -37,9 +39,22 @@ export interface DepositData {
  */
 export function parseDepositData(input: string): DepositData | null {
   try {
+    console.log('Parsing deposit data from input length:', input.length);
+    
     // Try parsing as JSON first
     if (input.startsWith('{')) {
-      return JSON.parse(input) as DepositData;
+      const parsed = JSON.parse(input) as DepositData;
+      console.log('Parsed deposit data:', parsed);
+      
+      // Ensure nullifier has correct format
+      if (parsed.nullifier && !parsed.nullifier.startsWith('0x')) {
+        parsed.nullifier = '0x' + parsed.nullifier;
+      }
+      if (parsed.secret && !parsed.secret.startsWith('0x')) {
+        parsed.secret = '0x' + parsed.secret;
+      }
+      
+      return parsed;
     }
     
     // Try parsing as commitment hash only
@@ -65,6 +80,12 @@ export async function generateWithdrawalProof(
   merkleProof: string[],
   leafIndex?: number
 ): Promise<WithdrawalProof> {
+  console.log('=== WITHDRAWAL PROOF GENERATION ===');
+  console.log('Deposit data:', JSON.stringify(depositData, null, 2));
+  console.log('Nullifier type:', typeof depositData.nullifier);
+  console.log('Nullifier value:', depositData.nullifier);
+  console.log('Nullifier length:', depositData.nullifier ? depositData.nullifier.length : 'undefined');
+  
   // Ensure PLONK prover is initialized
   if (!plonkProverService.isInitialized()) {
     console.log('Initializing PLONK prover...');
@@ -77,11 +98,21 @@ export async function generateWithdrawalProof(
   // Use leaf index from deposit ID if not provided
   const index = leafIndex !== undefined ? leafIndex : parseInt(depositData.depositId, 10);
   
+  // Check if nullifierHash is missing (old deposits) and compute it
+  if (!depositData.nullifierHash) {
+    console.log('Computing nullifierHash for legacy deposit...');
+    const { computeNullifierHash } = await import('../utils/mimc');
+    depositData.nullifierHash = '0x' + BigInt(computeNullifierHash(depositData.nullifier)).toString(16).padStart(64, '0');
+    console.log('Computed nullifierHash:', depositData.nullifierHash);
+  }
+  
   // Generate the PLONK proof
+  // Use the exact amountWei that was used in the commitment during deposit
+  const amountForProof = depositData.amountWei || depositData.amount;
   const generatedProof = await plonkProverService.generateWithdrawalProof(
     depositData.secret,
     depositData.nullifier,
-    depositData.amount,
+    amountForProof,
     recipient,
     merkleRoot,
     merkleProof,
@@ -199,7 +230,19 @@ export async function estimateWithdrawalFees(
   const networkFee = networkFees[chainId] || BigInt(0);
   
   // Protocol fee: 0.1% of amount
-  const protocolFee = BigInt(amount) / BigInt(1000);
+  // Handle decimal amounts by converting to wei first
+  let amountBigInt: bigint;
+  if (amount.includes('.')) {
+    // Determine decimals based on chainId
+    const decimals = chainId === 'BTC' ? 8 :  // Bitcoin
+                    chainId === 'ICP' ? 8 :  // ICP
+                    18; // Ethereum and others
+    amountBigInt = BigInt(Math.floor(parseFloat(amount) * Math.pow(10, decimals)));
+  } else {
+    amountBigInt = BigInt(amount);
+  }
+  
+  const protocolFee = amountBigInt / BigInt(1000);
   
   const total = networkFee + protocolFee;
   

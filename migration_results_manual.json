@@ -1,0 +1,92 @@
+{
+  "timestamp": "2025-07-07T18:54:16.043Z",
+  "oldCanisterId": "hhveh-piaaa-aaaaj-a2dga-cai",
+  "newCanisterId": "rfun2-iaaaa-aaaac-qa7wq-cai",
+  "totalDeposits": 16,
+  "successCount": 0,
+  "errorCount": 16,
+  "oldRoot": "0x2c02d20945a2f7df07787acbe990b7ab818f650cc74df892b8f2b3a18dcf2641",
+  "newRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "results": [
+    {
+      "depositId": 0,
+      "status": "error",
+      "error": "Unauthorized"
+    },
+    {
+      "depositId": 1,
+      "status": "error",
+      "error": "Unauthorized"
+    },
+    {
+      "depositId": 2,
+      "status": "error",
+      "error": "Unauthorized"
+    },
+    {
+      "depositId": 3,
+      "status": "error",
+      "error": "Unauthorized"
+    },
+    {
+      "depositId": 4,
+      "status": "error",
+      "error": "Unauthorized"
+    },
+    {
+      "depositId": 5,
+      "status": "error",
+      "error": "Unauthorized"
+    },
+    {
+      "depositId": 6,
+      "status": "error",
+      "error": "Unauthorized"
+    },
+    {
+      "depositId": 7,
+      "status": "error",
+      "error": "Unauthorized"
+    },
+    {
+      "depositId": 8,
+      "status": "error",
+      "error": "Unauthorized"
+    },
+    {
+      "depositId": 9,
+      "status": "error",
+      "error": "Unauthorized"
+    },
+    {
+      "depositId": 10,
+      "status": "error",
+      "error": "Unauthorized"
+    },
+    {
+      "depositId": 11,
+      "status": "error",
+      "error": "Unauthorized"
+    },
+    {
+      "depositId": 12,
+      "status": "error",
+      "error": "Unauthorized"
+    },
+    {
+      "depositId": 13,
+      "status": "error",
+      "error": "Unauthorized"
+    },
+    {
+      "depositId": 14,
+      "status": "error",
+      "error": "Unauthorized"
+    },
+    {
+      "depositId": 15,
+      "status": "error",
+      "error": "Unauthorized"
+    }
+  ]
+}

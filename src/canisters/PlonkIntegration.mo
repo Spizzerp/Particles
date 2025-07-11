@@ -18,9 +18,9 @@ import Debug "mo:base/Debug";
 /// to provide full cryptographic verification of ZK proofs
 module {
     
-    // PLONK verifier canister ID (local)
-    // Update this with your deployed verifier canister ID
-    public let PLONK_VERIFIER_CANISTER = "asrmz-lmaaa-aaaaa-qaaeq-cai";
+    // PLONK verifier canister ID (mainnet)
+    // Updated with deployed verifier canister ID
+    public let PLONK_VERIFIER_CANISTER = "f66vz-jaaaa-aaaaj-a2eua-cai";
     
     // Interface to the PLONK verifier canister
     public type PlonkVerifier = actor {

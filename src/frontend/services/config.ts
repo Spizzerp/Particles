@@ -3,7 +3,7 @@ import { HttpAgent } from '@dfinity/agent';
 // Canister IDs - these will be populated after deployment
 // Using IC mainnet canister IDs
 export const CANISTER_IDS = {
-  depositManager: import.meta.env.VITE_DEPOSIT_MANAGER_CANISTER_ID || 'hhveh-piaaa-aaaaj-a2dga-cai',
+  depositManager: import.meta.env.VITE_DEPOSIT_MANAGER_CANISTER_ID || 'rfun2-iaaaa-aaaac-qa7wq-cai', // Updated to deposit_manager_v2
   patternBreaker: import.meta.env.VITE_PATTERN_BREAKER_CANISTER_ID || 'avqkn-guaaa-aaaaa-qaaea-cai',
   withdrawalProcessor: import.meta.env.VITE_WITHDRAWAL_PROCESSOR_CANISTER_ID || 'hauct-cqaaa-aaaaj-a2dgq-cai',
   ethereumAdapter: import.meta.env.VITE_ETHEREUM_ADAPTER_CANISTER_ID || '55iy2-vaaaa-aaaas-amn7a-cai',

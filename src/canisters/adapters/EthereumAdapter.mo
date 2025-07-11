@@ -156,12 +156,10 @@ module {
         owner: EthereumAddress
     ) : async Result.Result<Nat, Text> {
         let data = encodeERC20Call("balanceOf", [owner]);
+        let callData = "{\"to\":\"" # tokenAddress # "\",\"data\":\"0x" # blobToHex(data) # "\"}";
         let request = buildJsonRpcRequest(
             "eth_call",
-            [{
-                to = tokenAddress;
-                data = "0x" # blobToHex(data);
-            }, "latest"]
+            [callData, "latest"]
         );
 
         switch (await makeRpcCall(httpOutcall, rpcUrl, request)) {
@@ -235,16 +233,17 @@ module {
         blockNumber: Nat;
     }], Text> {
         let transferTopic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
-        let recipientTopic = "0x" # Text.repeat("0", 24) # Text.toLowercase(Text.replace(recipientAddress, #text("0x"), ""));
+        // Pad address to 32 bytes (64 hex chars) - addresses are 20 bytes, so we need 24 zeros
+        let zeros = "000000000000000000000000";
+        let recipientTopic = "0x" # zeros # Text.toLowercase(Text.replace(recipientAddress, #text("0x"), ""));
         
+        let logsFilter = "{\"address\":\"" # tokenAddress # 
+            "\",\"topics\":[\"" # transferTopic # "\",null,\"" # recipientTopic # 
+            "\"],\"fromBlock\":\"0x" # natToHex(fromBlock) # 
+            "\",\"toBlock\":\"latest\"}";
         let request = buildJsonRpcRequest(
             "eth_getLogs",
-            [{
-                address = tokenAddress;
-                topics = [transferTopic, null, recipientTopic];
-                fromBlock = "0x" # natToHex(fromBlock);
-                toBlock = "latest";
-            }]
+            [logsFilter]
         );
 
         switch (await makeRpcCall(httpOutcall, rpcUrl, request)) {
@@ -495,19 +494,14 @@ module {
     private func extractJsonField(json: Text, field: Text) : ?Text {
         // Simplified JSON parsing - production would use proper parser
         let pattern = "\"" # field # "\":\"";
-        switch (Text.split(json, #text(pattern))) {
-            case (parts) {
-                if (parts.size() > 1) {
-                    switch (Text.split(parts[1], #text("\""))) {
-                        case (valueParts) {
-                            if (valueParts.size() > 0) {
-                                ?valueParts[0]
-                            } else { null }
-                        };
-                    }
-                } else { null }
-            };
-        }
+        let parts = Iter.toArray(Text.split(json, #text(pattern)));
+        
+        if (parts.size() > 1) {
+            let valueParts = Iter.toArray(Text.split(parts[1], #text("\"")));
+            if (valueParts.size() > 0) {
+                ?valueParts[0]
+            } else { null }
+        } else { null }
     };
 
     private func parseTransactionReceipt(json: Text) : Result.Result<{

@@ -78,4 +78,11 @@ module {
         withdrawals: [Withdrawal];
         patterns: [Text];
     };
+    
+    // Result type for deposit operations
+    public type DepositResult = {
+        depositId: Nat;
+        leafIndex: Nat;
+        merkleRoot: Text;
+    };
 }

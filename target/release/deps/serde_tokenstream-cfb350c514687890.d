@@ -1,0 +1,10 @@
+/Users/spizzerp/ParticleFund/target/release/deps/libserde_tokenstream-cfb350c514687890.rmeta: /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/lib.rs /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/ibidem.rs /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/ordered_map.rs /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/serde_tokenstream.rs
+
+/Users/spizzerp/ParticleFund/target/release/deps/libserde_tokenstream-cfb350c514687890.rlib: /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/lib.rs /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/ibidem.rs /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/ordered_map.rs /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/serde_tokenstream.rs
+
+/Users/spizzerp/ParticleFund/target/release/deps/serde_tokenstream-cfb350c514687890.d: /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/lib.rs /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/ibidem.rs /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/ordered_map.rs /Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/serde_tokenstream.rs
+
+/Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/lib.rs:
+/Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/ibidem.rs:
+/Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/ordered_map.rs:
+/Users/spizzerp/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde_tokenstream-0.2.2/src/serde_tokenstream.rs:

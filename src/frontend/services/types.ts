@@ -87,21 +87,41 @@ export interface PatternData {
 export type Result<T, E> = { ok: T } | { err: E };
 
 // Service interfaces for each canister
+export interface DepositResult {
+  depositId: bigint;
+  leafIndex: bigint;
+  merkleRoot: string;
+}
+
 export interface DepositManagerService {
   deposit: (
     amount: Amount,
     tokenId: TokenId,
     chainId: ChainId,
     commitment: CommitmentHash
-  ) => Promise<Result<bigint, string>>;
-  getDeposit: (depositId: bigint) => Promise<Deposit | undefined>;
+  ) => Promise<Result<DepositResult, string>>;
+  getDeposit: (depositId: bigint) => Promise<[] | [Deposit]>;
   getUserDeposits: (user: Principal) => Promise<Deposit[]>;
   getTotalDeposits: () => Promise<bigint>;
-  getMerkleRoot: (level?: bigint) => Promise<MerkleRoot | undefined>;
-  getCurrentMerkleRoot: () => Promise<MerkleRoot | undefined>;
-  getLeafCount: () => Promise<bigint>;
-  getMerkleProof: (depositId: bigint) => Promise<Result<string[], string>>;
-  updateMerkleTree: (level: bigint, root: MerkleRoot) => Promise<Result<null, string>>;
+  getCurrentMerkleRoot: () => Promise<string>;
+  getAllDeposits: () => Promise<Deposit[]>;
+  getCommitmentsInOrder: () => Promise<string[]>;
+  getMerkleProof: (leafIndex: bigint) => Promise<Result<string[], string>>;
+  verifyMerkleProof: (
+    commitment: string,
+    leafIndex: bigint,
+    proof: string[],
+    root: string
+  ) => Promise<boolean>;
+  migrateDeposit: (
+    id: bigint,
+    user: Principal,
+    amount: bigint,
+    tokenId: string,
+    chainId: bigint,
+    commitment: string,
+    timestamp: bigint
+  ) => Promise<Result<DepositResult, string>>;
 }
 
 

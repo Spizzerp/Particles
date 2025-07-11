@@ -5,6 +5,10 @@
       "type": "motoko",
       "main": "src/canisters/DepositManager.mo"
     },
+    "deposit_manager_v2": {
+      "type": "motoko",
+      "main": "src/canisters/DepositManager_V2.mo"
+    },
     "withdrawal_processor": {
       "type": "motoko",
       "main": "src/canisters/WithdrawalProcessor.mo"

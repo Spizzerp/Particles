@@ -2,7 +2,7 @@ import { Actor, ActorSubclass, HttpAgent, Identity } from '@dfinity/agent';
 import { IDL } from '@dfinity/candid';
 import { Principal } from '@dfinity/principal';
 import { CANISTER_IDS, IC_HOST, IS_LOCAL } from './config';
-import { idlFactory as depositManagerIDL } from './candid/depositManager.did.js';
+import { idlFactory as depositManagerIDL } from '../../declarations/deposit_manager_v2';
 import { idlFactory as withdrawalProcessorIDL } from './candid/withdrawalProcessor.did.js';
 import type {
   DepositManagerService,
@@ -40,7 +40,7 @@ const createDepositManagerIDL = (): IDL.InterfaceFactory => {
     getMerkleRoot: IDL.Func([IDL.Nat], [IDL.Opt(IDL.Text)], ['query']),
     getCurrentMerkleRoot: IDL.Func([], [IDL.Opt(IDL.Text)], ['query']),
     getLeafCount: IDL.Func([], [IDL.Nat], ['query']),
-    getMerkleProof: IDL.Func([IDL.Nat], [IDL.Variant({ ok: IDL.Vec(IDL.Text), err: IDL.Text })], ['query']),
+    getAllCommitments: IDL.Func([], [IDL.Vec(IDL.Text)], ['query']),
     updateMerkleTree: IDL.Func(
       [IDL.Nat, IDL.Text],
       [IDL.Variant({ ok: IDL.Null, err: IDL.Text })],
@@ -161,6 +161,15 @@ export const getEthereumAdapterActor = async (identity?: Identity): Promise<Acto
       }))], ['query']),
       processSingleDeposit: IDL.Func([IDL.Text], [IDL.Variant({ ok: IDL.Text, err: IDL.Text })], []),
       processSingleDepositV2: IDL.Func([IDL.Text], [IDL.Variant({ ok: IDL.Text, err: IDL.Text })], []),
+      getDepositGasEstimate: IDL.Func([], [IDL.Variant({ 
+        ok: IDL.Record({
+          gasLimit: IDL.Nat,
+          estimatedGasPrice: IDL.Nat,
+          estimatedTotalCost: IDL.Nat,
+          estimatedTotalCostEth: IDL.Text,
+        }), 
+        err: IDL.Text 
+      })], []),
     });
   };
 

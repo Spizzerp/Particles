@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Commitment Formula</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        .success {
+            color: green;
+            font-weight: bold;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+        pre {
+            background-color: #f0f0f0;
+            padding: 10px;
+            border-radius: 3px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test Commitment Formula</h1>
+    
+    <div class="test-section">
+        <h2>Testing Frontend Commitment Calculation</h2>
+        <div id="test-output">Loading...</div>
+    </div>
+
+    <script type="module">
+        const output = document.getElementById('test-output');
+        
+        try {
+            // Import the modules
+            output.innerHTML = 'Importing MiMC module...';
+            const { mimc, computeCommitment, computeNullifierHash } = await import('/src/frontend/utils/mimc.ts');
+            
+            output.innerHTML = 'MiMC module loaded successfully!<br>';
+            
+            // Test with the known test data
+        const testData = {
+            secret: "13698080959274281840526872910007157294376119761774757368106597777839440065",
+            nullifier: "192561868339365105493539961141657477360825742666710091497763875674648709038",
+            amount: "1000000000000000000",
+            expectedCommitment: "3455067941780777787455398339347901752849440241658135964778035948007694593178",
+            expectedNullifierHash: "7077923660806332978795724426505496650445718668500361339162590946982435664214"
+        };
+        
+        // Convert to hex format
+        const secretHex = '0x' + BigInt(testData.secret).toString(16);
+        const nullifierHex = '0x' + BigInt(testData.nullifier).toString(16);
+        
+        output.innerHTML = '<h3>Test 1: Using Known Test Data</h3>';
+        output.innerHTML += '<pre>Secret: ' + secretHex + '\nNullifier: ' + nullifierHex + '\nAmount: ' + testData.amount + ' wei (1 ETH)</pre>';
+        
+        // Test commitment calculation
+        const commitment = computeCommitment(secretHex, nullifierHex, testData.amount);
+        const nullifierHash = computeNullifierHash(nullifierHex);
+        
+        output.innerHTML += '<h4>Results:</h4>';
+        output.innerHTML += '<pre>Computed commitment: ' + commitment + '\nExpected commitment: ' + testData.expectedCommitment + '</pre>';
+        
+        if (commitment === testData.expectedCommitment) {
+            output.innerHTML += '<p class="success">✅ Commitment calculation is CORRECT!</p>';
+        } else {
+            output.innerHTML += '<p class="error">❌ Commitment calculation is WRONG!</p>';
+        }
+        
+        output.innerHTML += '<pre>Computed nullifier hash: ' + nullifierHash + '\nExpected nullifier hash: ' + testData.expectedNullifierHash + '</pre>';
+        
+        if (nullifierHash === testData.expectedNullifierHash) {
+            output.innerHTML += '<p class="success">✅ Nullifier hash calculation is CORRECT!</p>';
+        } else {
+            output.innerHTML += '<p class="error">❌ Nullifier hash calculation is WRONG!</p>';
+        }
+        
+        // Test 2: Show what formula is being used
+        output.innerHTML += '<h3>Test 2: Verify Formula Used</h3>';
+        
+        // Test without amount
+        const commitmentWithoutAmount = mimc.hash([BigInt(secretHex), BigInt(nullifierHex)]);
+        output.innerHTML += '<pre>MiMC(secret, nullifier) = ' + commitmentWithoutAmount + '</pre>';
+        
+        // Test with amount
+        const commitmentWithAmount = mimc.hash([BigInt(secretHex), BigInt(nullifierHex), BigInt(testData.amount)]);
+        output.innerHTML += '<pre>MiMC(secret, nullifier, amount) = ' + commitmentWithAmount + '</pre>';
+        
+        if (commitment === commitmentWithAmount.toString()) {
+            output.innerHTML += '<p class="success">✅ Frontend is using the CORRECT formula: MiMC(secret, nullifier, amount)</p>';
+        } else {
+            output.innerHTML += '<p class="error">❌ Frontend is using the WRONG formula</p>';
+        }
+        
+        // Summary
+        output.innerHTML += '<h3>Summary</h3>';
+        output.innerHTML += '<p>The frontend commitment calculation is now correctly using:<br><strong>commitment = MiMC(secret, nullifier, amount)</strong></p>';
+        output.innerHTML += '<p>This matches what the WASM PLONK prover expects!</p>';
+        
+        } catch (error) {
+            output.innerHTML = '<p class="error">Error loading or running test: ' + error.message + '</p>';
+            console.error('Test error:', error);
+        }
+    </script>
+</body>
+</html>

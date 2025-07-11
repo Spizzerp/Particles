@@ -211,39 +211,158 @@ class PlonkProverService {
     const nullifierHash = await this.computeNullifierHash(nullifier);
     
     // Convert leaf index to binary indices for merkle proof
+    // The circuit expects indices from ROOT to LEAF (MSB first)
     const depth = merklePath.length;
     const merkleIndices: number[] = [];
-    let index = leafIndex;
-    for (let i = 0; i < depth; i++) {
-      merkleIndices.push(index % 2);
-      index = Math.floor(index / 2);
+    
+    // Generate indices in MSB-first order
+    for (let i = depth - 1; i >= 0; i--) {
+      const bit = (leafIndex >> i) & 1;
+      merkleIndices.push(bit);
+    }
+    
+    console.log(`Leaf index ${leafIndex} converted to merkle indices:`, merkleIndices);
+    
+    // Convert amount to wei if it's in decimal format
+    let amountInWei: string;
+    if (amount.includes('.')) {
+      // Assume ETH with 18 decimals
+      amountInWei = Math.floor(parseFloat(amount) * Math.pow(10, 18)).toString();
+    } else {
+      amountInWei = amount;
+    }
+    
+    // Ensure all hex values have 0x prefix
+    const formatHex = (value: string): string => {
+      return value.startsWith('0x') ? value : `0x${value}`;
+    };
+    
+    // Helper to pad hex values to specified byte length
+    const padHexToBytes = (hex: string, targetBytes: number): string => {
+      let formatted = formatHex(hex);
+      const hexWithoutPrefix = formatted.slice(2);
+      
+      // Fix odd-length hex strings
+      if (hexWithoutPrefix.length % 2 === 1) {
+        formatted = '0x0' + hexWithoutPrefix;
+      }
+      
+      // Pad to target byte length
+      const currentHexLength = formatted.slice(2).length;
+      const targetHexLength = targetBytes * 2;
+      if (currentHexLength < targetHexLength) {
+        const paddingNeeded = targetHexLength - currentHexLength;
+        formatted = '0x' + '0'.repeat(paddingNeeded) + formatted.slice(2);
+      }
+      
+      return formatted;
+    };
+    
+    // Pad secret to 32 bytes (31 bytes are padded to 32)
+    const formattedSecret = padHexToBytes(secret, 32);
+    if (formattedSecret !== formatHex(secret)) {
+      console.log('Padded secret to 32 bytes:', formattedSecret);
+    }
+    
+    // Pad nullifier to 32 bytes if it's 31 bytes
+    let formattedNullifier = formatHex(nullifier);
+    
+    // Remove 0x prefix for length checking
+    const hexWithoutPrefix = formattedNullifier.slice(2);
+    
+    // If hex string has odd length, pad with leading zero
+    if (hexWithoutPrefix.length % 2 === 1) {
+      formattedNullifier = '0x0' + hexWithoutPrefix;
+      console.log('Padded odd-length nullifier:', formattedNullifier);
+    }
+    
+    // Now check if it's less than 32 bytes (64 hex chars)
+    const currentHexLength = formattedNullifier.slice(2).length;
+    if (currentHexLength < 64) {
+      // Pad with leading zeros to make it 32 bytes
+      const paddingNeeded = 64 - currentHexLength;
+      formattedNullifier = '0x' + '0'.repeat(paddingNeeded) + formattedNullifier.slice(2);
+      console.log('Padded nullifier to 32 bytes:', formattedNullifier);
     }
     
     const inputs: ProverInputs = {
-      secret,
-      nullifier,
-      amount,
-      merklePath,
+      secret: formattedSecret,
+      nullifier: formattedNullifier,
+      amount: amountInWei,
+      merklePath: merklePath.map(formatHex),
       merkleIndices,
-      merkleRoot,
-      nullifierHash,
-      recipient,
+      merkleRoot: formatHex(merkleRoot),
+      nullifierHash: formatHex(nullifierHash),
+      recipient: formatHex(recipient),
       relayer: "0x0000000000000000000000000000000000000000",
       fee: "0",
       refund: "0"
     };
     
+    // Debug log to check merkleRoot type
+    console.log('Prover inputs:', {
+      ...inputs,
+      merkleRootType: typeof merkleRoot,
+      merkleRootValue: merkleRoot,
+      merkleRootIsArray: Array.isArray(merkleRoot)
+    });
+    
     return this.generateProof(inputs);
   }
 
   private async computeNullifierHash(nullifier: string): Promise<string> {
-    // The nullifier should already be a hash from the deposit process
-    // Validate it's a proper hash format
-    if (nullifier.startsWith('0x') && nullifier.length === 66) {
-      return nullifier;
+    // For privacy pools, nullifierHash = hash(nullifier)
+    // The nullifier is a secret value, nullifierHash is what gets revealed
+    
+    console.log('Computing nullifier hash for:', nullifier);
+    console.log('Nullifier length:', nullifier.length);
+    
+    // Handle nullifier with or without 0x prefix
+    const cleanNullifier = nullifier.startsWith('0x') ? nullifier : `0x${nullifier}`;
+    console.log('Clean nullifier:', cleanNullifier);
+    console.log('Clean nullifier length:', cleanNullifier.length);
+    
+    // Fix odd-length hex strings
+    let fixedNullifier = cleanNullifier;
+    const hexWithoutPrefix = cleanNullifier.slice(2);
+    if (hexWithoutPrefix.length % 2 === 1) {
+      fixedNullifier = '0x0' + hexWithoutPrefix;
+      console.log('Fixed odd-length nullifier:', fixedNullifier);
     }
     
-    throw new Error('Invalid nullifier format - must be a 32-byte hex hash');
+    // Check if it's a valid hex value (31 or 32 bytes are both valid)
+    // Old deposits might have 31 bytes, new ones have 32 bytes
+    // 31 bytes = 62 hex chars, 32 bytes = 64 hex chars (plus 0x prefix)
+    const hexLength = fixedNullifier.slice(2).length;
+    const byteLength = hexLength / 2;
+    const isValid31Bytes = byteLength === 31 && /^0x[0-9a-fA-F]+$/.test(fixedNullifier);
+    const isValid32Bytes = byteLength === 32 && /^0x[0-9a-fA-F]+$/.test(fixedNullifier);
+    
+    console.log('Hex length:', hexLength, 'Byte length:', byteLength);
+    console.log('Is valid 31 bytes:', isValid31Bytes);
+    console.log('Is valid 32 bytes:', isValid32Bytes);
+    
+    if (isValid31Bytes || isValid32Bytes) {
+      // Import the computeNullifierHash helper that uses MiMC
+      const { computeNullifierHash } = await import('../utils/mimc');
+      
+      // Pad to 32 bytes by adding leading zeros
+      let paddedNullifier = fixedNullifier;
+      if (hexLength < 64) {
+        const paddingNeeded = 64 - hexLength;
+        paddedNullifier = '0x' + '0'.repeat(paddingNeeded) + fixedNullifier.slice(2);
+        console.log('Padded nullifier to 32 bytes for hashing:', paddedNullifier);
+      }
+      
+      // Use the helper function that matches the circuit
+      const nullifierHashDecimal = computeNullifierHash(paddedNullifier);
+      
+      // Convert decimal result to hex format
+      const nullifierHashBigInt = BigInt(nullifierHashDecimal);
+      return '0x' + nullifierHashBigInt.toString(16).padStart(64, '0');
+    }
+    
+    throw new Error('Invalid nullifier format - must be a 31 or 32-byte hex value');
   }
 
   isInitialized(): boolean {

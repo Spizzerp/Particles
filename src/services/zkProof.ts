@@ -213,12 +213,31 @@ export class PlonkProofService {
    * Generate a random secret and nullifier for a new deposit
    */
   async generateDepositNote(): Promise<DepositNote> {
-    // Generate 31-byte random values (to fit in field)
-    const secret = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(31)))
+    // Generate 32-byte random values but ensure they're < field modulus
+    const fieldModulus = BigInt("21888242871839275222246405745257275088548364400416034343698204186575808495617");
+    
+    // Helper to generate field-safe 32-byte value
+    const generateFieldElement = (): Uint8Array => {
+      while (true) {
+        const bytes = crypto.getRandomValues(new Uint8Array(32));
+        // Clear top 4 bits to ensure < field modulus
+        bytes[0] = bytes[0] & 0x0F;
+        
+        const value = BigInt('0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(''));
+        if (value < fieldModulus) {
+          return bytes;
+        }
+      }
+    };
+    
+    const secretBytes = generateFieldElement();
+    const nullifierBytes = generateFieldElement();
+    
+    const secret = '0x' + Array.from(secretBytes)
       .map(b => b.toString(16).padStart(2, '0'))
       .join('');
     
-    const nullifier = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(31)))
+    const nullifier = '0x' + Array.from(nullifierBytes)
       .map(b => b.toString(16).padStart(2, '0'))
       .join('');
 

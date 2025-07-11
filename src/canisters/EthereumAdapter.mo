@@ -310,9 +310,9 @@ actor EthereumAdapter {
 
     // Inter-canister communication with DepositManager
     private let depositManager : actor {
-        deposit : (Nat, Text, Nat, Text) -> async Result.Result<Nat, Text>;
-        getCurrentMerkleRoot : () -> async ?Text;
-    } = actor("hhveh-piaaa-aaaaj-a2dga-cai");
+        deposit : (Nat, Text, Nat, Text) -> async Result.Result<{ depositId: Nat; leafIndex: Nat; merkleRoot: Text }, Text>;
+        getCurrentMerkleRoot : () -> async Text;
+    } = actor("rfun2-iaaaa-aaaac-qa7wq-cai"); // Updated to deposit_manager_v2
 
     // EVM RPC canister interface
     private let evmRpc : actor {
@@ -664,8 +664,8 @@ actor EthereumAdapter {
                                 info.commitment
                             );
                             switch (depositResult) {
-                                case (#ok(depositId)) {
-                                    Debug.print("Added deposit with ID: " # Nat.toText(depositId));
+                                case (#ok(depositResult)) {
+                                    Debug.print("Added deposit with ID: " # Nat.toText(depositResult.depositId));
                                 };
                                 case (#err(e)) {
                                     Debug.print("Warning: Failed to add deposit: " # e);
@@ -1359,10 +1359,7 @@ actor EthereumAdapter {
     // Get current Merkle root
     public shared(msg) func getCurrentMerkleRoot() : async Result.Result<Text, Text> {
         let root = await depositManager.getCurrentMerkleRoot();
-        switch (root) {
-            case (?r) { #ok(r) };
-            case null { #err("No Merkle root found") };
-        }
+        #ok(root)
     };
     
     // Migration function to handle old deposits with different derivation
@@ -1539,6 +1536,52 @@ actor EthereumAdapter {
     // Get the current Keccak256 canister ID
     public query func getKeccak256CanisterId() : async Text {
         keccak256CanisterId
+    };
+    
+    // Get current gas estimation for deposit forwarding
+    public func getDepositGasEstimate() : async Result.Result<{
+        gasLimit: Nat;
+        estimatedGasPrice: Nat;
+        estimatedTotalCost: Nat;
+        estimatedTotalCostEth: Text;
+    }, Text> {
+        try {
+            // Get current gas prices from chain
+            let gasPrices = switch (await getGasPrices()) {
+                case (#ok(prices)) { prices };
+                case (#err(e)) { return #err("Failed to get gas prices: " # e) };
+            };
+            
+            // Gas limit for deposit forwarding (same as used in processSingleDepositV2)
+            let gasLimit : Nat = 80000;
+            
+            // Calculate estimated gas price with 50% buffer for safety
+            // Using larger buffer than execution (10%) to account for gas price volatility
+            let estimatedGasPrice = gasPrices.baseFee + gasPrices.maxPriorityFee + (gasPrices.baseFee / 2);
+            
+            // Calculate total cost
+            let estimatedTotalCost = estimatedGasPrice * gasLimit;
+            
+            // Convert to ETH string (with 6 decimal places for better precision)
+            let ethWhole = estimatedTotalCost / 1_000_000_000_000_000_000;
+            let ethFraction = (estimatedTotalCost % 1_000_000_000_000_000_000) / 1_000_000_000_000; // 6 decimals
+            let ethFractionStr = Nat.toText(ethFraction);
+            let paddedFraction = (if (ethFraction < 100000) { "0" } else { "" }) #
+                                (if (ethFraction < 10000) { "0" } else { "" }) #
+                                (if (ethFraction < 1000) { "0" } else { "" }) #
+                                (if (ethFraction < 100) { "0" } else { "" }) #
+                                (if (ethFraction < 10) { "0" } else { "" }) #
+                                ethFractionStr;
+            
+            #ok({
+                gasLimit = gasLimit;
+                estimatedGasPrice = estimatedGasPrice;
+                estimatedTotalCost = estimatedTotalCost;
+                estimatedTotalCostEth = Nat.toText(ethWhole) # "." # paddedFraction;
+            })
+        } catch (e) {
+            #err("Failed to estimate gas: " # Error.message(e))
+        }
     };
     
     // Debug: Compare address generation methods
@@ -2051,8 +2094,8 @@ actor EthereumAdapter {
                                 info.commitment
                             );
                             switch (depositResult) {
-                                case (#ok(depositId)) {
-                                    Debug.print("Added deposit with ID: " # Nat.toText(depositId));
+                                case (#ok(depositResult)) {
+                                    Debug.print("Added deposit with ID: " # Nat.toText(depositResult.depositId));
                                 };
                                 case (#err(e)) {
                                     Debug.print("Warning: Failed to add deposit: " # e);
@@ -2376,8 +2419,8 @@ actor EthereumAdapter {
                                 info.commitment
                             );
                             switch (depositResult) {
-                                case (#ok(depositId)) {
-                                    Debug.print("Added deposit with ID: " # Nat.toText(depositId));
+                                case (#ok(depositResult)) {
+                                    Debug.print("Added deposit with ID: " # Nat.toText(depositResult.depositId));
                                 };
                                 case (#err(e)) {
                                     Debug.print("Warning: Failed to add deposit: " # e);

@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../contexts/AuthContext';
 import { getWithdrawalProcessor, getDepositManager } from '../services/actorFactory';
 import { 
   parseDepositData, 
@@ -13,7 +12,6 @@ import ProofStatus from '../components/ProofStatus';
 import './WithdrawPage.css';
 
 const WithdrawPage: React.FC = () => {
-  const { identity, isAuthenticated } = useAuth();
   const [commitmentInput, setCommitmentInput] = useState('');
   const [recipient, setRecipient] = useState('');
   const [selectedChain, setSelectedChain] = useState('ICP');
@@ -41,7 +39,12 @@ const WithdrawPage: React.FC = () => {
     setCommitmentInput(value);
     const parsed = parseDepositData(value);
     if (parsed) {
-      setDepositData(parsed);
+      // Ensure we have both the display amount and the wei amount
+      const depositDataWithWei = {
+        ...parsed,
+        amountWei: parsed.amountWei || parsed.amount // Fallback to amount if amountWei not stored
+      };
+      setDepositData(depositDataWithWei);
       // Auto-select the chain from deposit if available
       if (parsed.chain) {
         setSelectedChain(parsed.chain);
@@ -82,29 +85,38 @@ const WithdrawPage: React.FC = () => {
       const depositId = BigInt(depositData.depositId);
       const depositInfo = await depositManager.getDeposit(depositId);
       
-      if (!depositInfo) {
+      if (depositInfo.length === 0) {
         throw new Error('Deposit not found');
       }
 
-      const deposit = depositInfo;
+      const deposit = depositInfo[0];
       
       // Get merkle root and proof from DepositManager
       setWithdrawalStatus('Generating merkle proof...');
-      const merkleRoot = await depositManager.getCurrentMerkleRoot();
+      const merkleRootResult = await depositManager.getCurrentMerkleRoot();
       
-      if (!merkleRoot) {
+      if (!merkleRootResult) {
         throw new Error('No merkle root found');
       }
       
-      // Use depositId as leafIndex (simplified approach)
-      const leafIndex = Number(depositData.depositId);
+      // Ensure merkleRoot is a string
+      let merkleRoot = Array.isArray(merkleRootResult) ? merkleRootResult[0] : merkleRootResult;
+      console.log('Merkle root fetched:', merkleRoot, 'Type:', typeof merkleRoot);
       
-      const merkleProofResult = await depositManager.getMerkleProof(BigInt(leafIndex));
+      // Use the deposit's leafIndex
+      const leafIndex = Number(deposit.leafIndex);
+      console.log('Using leaf index from deposit:', leafIndex);
+      
+      // Get merkle proof from the canister
+      console.log('Fetching merkle proof from canister for leaf index', leafIndex);
+      const merkleProofResult = await depositManager.getMerkleProof(deposit.leafIndex);
+      
       if ('err' in merkleProofResult) {
-        throw new Error('Could not generate merkle proof: ' + merkleProofResult.err);
+        throw new Error(`Failed to get merkle proof: ${merkleProofResult.err}`);
       }
       
       const merkleProof = merkleProofResult.ok;
+      console.log('Merkle proof fetched from canister:', merkleProof);
 
       // Generate ZK proof
       setWithdrawalStatus('Generating zero-knowledge proof...');
@@ -148,10 +160,29 @@ const WithdrawPage: React.FC = () => {
         wire_values_at_z_omega: withdrawalProof.proof.wire_values_at_z_omega
       };
       
+      // Convert amount to wei if it's in ETH format
+      let amountInWei: bigint;
+      if (depositData.amountWei) {
+        // Use the exact amount that was used in the commitment
+        amountInWei = BigInt(depositData.amountWei);
+      } else if (withdrawalProof.amount.includes('.')) {
+        // Amount is in ETH, convert to wei
+        const decimals = depositData.token === 'ETH' ? 18 : 
+                        depositData.token === 'BTC' ? 8 : 
+                        6; // Default for others
+        amountInWei = BigInt(Math.floor(parseFloat(withdrawalProof.amount) * Math.pow(10, decimals)));
+      } else {
+        // Amount is already in smallest unit
+        amountInWei = BigInt(withdrawalProof.amount);
+      }
+      
+      // Use the pre-computed nullifierHash if available
+      const nullifierHashToUse = depositData.nullifierHash || withdrawalProof.nullifier;
+      
       const result = await withdrawalProcessor.initiateWithdrawal(
-        withdrawalProof.nullifier,
+        nullifierHashToUse,
         formattedRecipient,
-        BigInt(withdrawalProof.amount),
+        amountInWei,
         depositData.token,
         BigInt(withdrawalProof.chainId || selectedChain),
         merkleRoot,
@@ -244,10 +275,35 @@ const WithdrawPage: React.FC = () => {
               <p>Protocol Fee: {formatAmount(fees.protocolFee, selectedChain === 'BTC' ? 0 : selectedChain === 'ICP' ? 2 : 1)}</p>
               <p className="total-fee">Total Fee: {formatAmount(fees.total, selectedChain === 'BTC' ? 0 : selectedChain === 'ICP' ? 2 : 1)}</p>
               <p className="receive-amount">
-                You will receive: {formatAmount(
-                  (BigInt(depositData.amount) - BigInt(fees.total)).toString(),
-                  selectedChain === 'BTC' ? 0 : selectedChain === 'ICP' ? 2 : 1
-                )} {depositData.token}
+                You will receive: {(() => {
+                  // Convert amounts to BigInt, handling decimal formats
+                  let depositAmountWei: bigint;
+                  let feeTotalWei: bigint;
+                  
+                  if (depositData.amount.includes('.')) {
+                    const decimals = depositData.token === 'ETH' ? 18 : 
+                                    depositData.token === 'BTC' ? 8 : 
+                                    6;
+                    depositAmountWei = BigInt(Math.floor(parseFloat(depositData.amount) * Math.pow(10, decimals)));
+                  } else {
+                    depositAmountWei = BigInt(depositData.amount);
+                  }
+                  
+                  if (fees.total.includes('.')) {
+                    const decimals = depositData.token === 'ETH' ? 18 : 
+                                    depositData.token === 'BTC' ? 8 : 
+                                    6;
+                    feeTotalWei = BigInt(Math.floor(parseFloat(fees.total) * Math.pow(10, decimals)));
+                  } else {
+                    feeTotalWei = BigInt(fees.total);
+                  }
+                  
+                  const receiveAmount = (depositAmountWei - feeTotalWei).toString();
+                  return formatAmount(
+                    receiveAmount,
+                    selectedChain === 'BTC' ? 0 : selectedChain === 'ICP' ? 2 : 1
+                  );
+                })()} {depositData.token}
               </p>
             </div>
           )}
@@ -255,14 +311,10 @@ const WithdrawPage: React.FC = () => {
           <button 
             type="submit" 
             className="btn withdraw-btn"
-            disabled={isProcessing || !depositData || !recipient || !isAuthenticated}
+            disabled={isProcessing || !depositData || !recipient}
           >
             {isProcessing ? 'Processing...' : 'Withdraw'}
           </button>
-
-          {!isAuthenticated && (
-            <p className="auth-warning">Please connect your wallet to withdraw</p>
-          )}
         </form>
 
         <ProofStatus status={proofStatus} />

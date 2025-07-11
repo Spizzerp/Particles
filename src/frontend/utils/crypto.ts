@@ -2,6 +2,7 @@
 import { Principal } from '@dfinity/principal';
 import { sha256 } from '@noble/hashes/sha256';
 import { randomBytes, bytesToHex, hexToBytes } from '@noble/hashes/utils';
+import { mimc } from './mimc';
 
 export interface Commitment {
   commitment: string;
@@ -96,7 +97,21 @@ export function verifyWithdrawalProof(
   // Basic validation
   if (!nullifier || nullifier.length !== 64) return false;
   if (!recipient || recipient.length === 0) return false;
-  if (!amount || BigInt(amount) <= 0) return false;
+  
+  // Handle amount validation with decimal support
+  try {
+    let amountValue: bigint;
+    if (amount.includes('.')) {
+      // Assume 18 decimals for validation purposes
+      amountValue = BigInt(Math.floor(parseFloat(amount) * Math.pow(10, 18)));
+    } else {
+      amountValue = BigInt(amount);
+    }
+    if (amountValue <= 0) return false;
+  } catch {
+    return false;
+  }
+  
   if (!merkleRoot || merkleRoot.length !== 64) return false;
   
   return true;
@@ -151,7 +166,19 @@ export async function estimateFees(
   const baseFee = baseFees[chainId] || BigInt(0);
   
   // Dynamic fee based on amount (0.1%)
-  const dynamicFee = BigInt(amount) / BigInt(1000);
+  // Handle decimal amounts by converting to wei first
+  let amountBigInt: bigint;
+  if (amount.includes('.')) {
+    // Determine decimals based on chainId
+    const decimals = chainId === 0 ? 8 :  // Bitcoin
+                    chainId === 1 ? 18 : // Ethereum
+                    8; // ICP default
+    amountBigInt = BigInt(Math.floor(parseFloat(amount) * Math.pow(10, decimals)));
+  } else {
+    amountBigInt = BigInt(amount);
+  }
+  
+  const dynamicFee = amountBigInt / BigInt(1000);
   
   const total = baseFee + dynamicFee;
   
@@ -173,7 +200,16 @@ export function formatAmount(amount: string, chainId: number): string {
   };
   
   const decimal = decimals[chainId] || 18;
-  const value = BigInt(amount);
+  
+  // Handle decimal amounts by converting to smallest unit first
+  let value: bigint;
+  if (amount.includes('.')) {
+    // Amount is already in decimal format (e.g., "0.005" ETH)
+    value = BigInt(Math.floor(parseFloat(amount) * Math.pow(10, decimal)));
+  } else {
+    // Amount is already in smallest unit (wei/satoshis)
+    value = BigInt(amount);
+  }
   const divisor = BigInt(10 ** decimal);
   
   const whole = value / divisor;
@@ -251,101 +287,106 @@ function uint8ArrayToHex(bytes: Uint8Array): string {
     .join('');
 }
 
-// Enhanced Merkle tree implementation
+// Enhanced Merkle tree implementation using MiMC
 export function buildMerkleTree(leaves: string[]): string {
   if (leaves.length === 0) return "";
   
-  // Convert leaves to Uint8Array format for hashing
-  let currentLevel = leaves.map(leaf => hexToUint8Array(leaf));
+  // Work with string representations for MiMC
+  let currentLevel = leaves.map(leaf => {
+    // Remove 0x prefix and ensure it's a valid field element
+    const cleanLeaf = leaf.replace('0x', '');
+    return BigInt('0x' + cleanLeaf).toString();
+  });
   
   while (currentLevel.length > 1) {
     const nextLevel = [];
     
     for (let i = 0; i < currentLevel.length; i += 2) {
       const left = currentLevel[i];
-      const right = i + 1 < currentLevel.length ? currentLevel[i + 1] : currentLevel[i];
+      const right = i + 1 < currentLevel.length ? currentLevel[i + 1] : "0"; // Use "0" for padding
       
-      // Ensure consistent ordering by comparing bytes
-      const shouldSwap = (() => {
-        for (let j = 0; j < Math.min(left.length, right.length); j++) {
-          if (left[j] < right[j]) return false;
-          if (left[j] > right[j]) return true;
-        }
-        return left.length > right.length;
-      })();
-      
-      const combined = new Uint8Array(left.length + right.length);
-      if (shouldSwap) {
-        combined.set(right, 0);
-        combined.set(left, right.length);
-      } else {
-        combined.set(left, 0);
-        combined.set(right, left.length);
-      }
-      
-      const hash = simpleHash(combined);
-      nextLevel.push(hexToUint8Array(hash));
+      // Hash using MiMC: parent = MiMC(left, right)
+      const parent = mimc.hash([left, right]);
+      nextLevel.push(parent);
     }
     
     currentLevel = nextLevel;
   }
   
-  return '0x' + uint8ArrayToHex(currentLevel[0]);
+  // Convert final root to hex format
+  const rootBigInt = BigInt(currentLevel[0]);
+  return '0x' + rootBigInt.toString(16).padStart(64, '0');
 }
 
-// Generate Merkle proof for a leaf
+// Generate Merkle proof for a leaf using MiMC
 export function generateMerkleProof(leaves: string[], targetLeaf: string): string[] {
-  if (leaves.length === 0 || !leaves.includes(targetLeaf)) return [];
+  if (leaves.length === 0) return [];
+  
+  // Find the target leaf (handle both with and without 0x prefix)
+  const targetLeafClean = targetLeaf.replace('0x', '').toLowerCase();
+  const targetIndex = leaves.findIndex(leaf => 
+    leaf.replace('0x', '').toLowerCase() === targetLeafClean
+  );
+  
+  if (targetIndex === -1) return [];
   
   const proof: string[] = [];
-  let currentLevel = leaves.map((leaf, index) => ({
-    hash: hexToUint8Array(leaf),
-    originalIndex: index
-  }));
   
-  const targetIndex = leaves.indexOf(targetLeaf);
+  // Convert leaves to field elements for MiMC
+  let currentLevel = leaves.map(leaf => {
+    const cleanLeaf = leaf.replace('0x', '');
+    return BigInt('0x' + cleanLeaf).toString();
+  });
+  
   let currentIndex = targetIndex;
   
-  while (currentLevel.length > 1) {
-    const nextLevel = [];
+  // For a complete tree with depth 20, we need to pad with zeros
+  const treeDepth = 20;
+  
+  // Build proof by going up the tree
+  for (let level = 0; level < treeDepth; level++) {
+    // Pad current level to be a power of 2
+    const levelSize = Math.pow(2, treeDepth - level);
+    while (currentLevel.length < levelSize) {
+      currentLevel.push("0");
+    }
+    
+    // Find the sibling
     const isRightNode = currentIndex % 2 === 1;
     const siblingIndex = isRightNode ? currentIndex - 1 : currentIndex + 1;
     
+    // Add sibling to proof (not the current node!)
     if (siblingIndex < currentLevel.length) {
-      proof.push('0x' + uint8ArrayToHex(currentLevel[siblingIndex].hash));
+      const siblingValue = currentLevel[siblingIndex];
+      const siblingHex = '0x' + BigInt(siblingValue).toString(16).padStart(64, '0');
+      proof.push(siblingHex);
+    } else {
+      proof.push('0x' + '0'.padStart(64, '0'));
     }
     
+    // Build next level using MiMC
+    const nextLevel = [];
     for (let i = 0; i < currentLevel.length; i += 2) {
       const left = currentLevel[i];
-      const right = i + 1 < currentLevel.length ? currentLevel[i + 1] : currentLevel[i];
+      const right = i + 1 < currentLevel.length ? currentLevel[i + 1] : "0";
       
-      // Compare hashes for consistent ordering
-      const shouldSwap = (() => {
-        for (let j = 0; j < Math.min(left.hash.length, right.hash.length); j++) {
-          if (left.hash[j] < right.hash[j]) return false;
-          if (left.hash[j] > right.hash[j]) return true;
-        }
-        return left.hash.length > right.hash.length;
-      })();
-      
-      const combined = new Uint8Array(left.hash.length + right.hash.length);
-      if (shouldSwap) {
-        combined.set(right.hash, 0);
-        combined.set(left.hash, right.hash.length);
-      } else {
-        combined.set(left.hash, 0);
-        combined.set(right.hash, left.hash.length);
-      }
-      
-      const hash = simpleHash(combined);
-      nextLevel.push({
-        hash: hexToUint8Array(hash),
-        originalIndex: Math.floor(i / 2)
-      });
+      // Hash using MiMC: parent = MiMC(left, right)
+      const parent = mimc.hash([left, right]);
+      nextLevel.push(parent);
     }
     
     currentLevel = nextLevel;
     currentIndex = Math.floor(currentIndex / 2);
+    
+    // If we've reduced to a single element and haven't finished all levels,
+    // we continue with that element
+    if (currentLevel.length === 1 && level < treeDepth - 1) {
+      // For sparse tree, continue with zeros as siblings
+      for (let remainingLevel = level + 1; remainingLevel < treeDepth; remainingLevel++) {
+        proof.push('0x' + '0'.padStart(64, '0'));
+      }
+      break;
+    }
   }
   
   return proof;

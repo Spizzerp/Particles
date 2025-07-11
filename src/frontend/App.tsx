@@ -5,6 +5,7 @@ import DepositPage from './pages/DepositPage';
 import WithdrawPage from './pages/WithdrawPage';
 import PoolsPage from './pages/PoolsPage';
 import PrivacyPage from './pages/PrivacyPage';
+import TestCommitmentPage from './pages/TestCommitmentPage';
 import Navigation from './components/Navigation';
 import { AuthProvider } from './contexts/AuthContext';
 
@@ -23,6 +24,7 @@ function AppContent() {
           <Route path="/withdraw" element={<WithdrawPage />} />
           <Route path="/pools" element={<PoolsPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/test-commitment" element={<TestCommitmentPage />} />
         </Routes>
       </main>
     </div>

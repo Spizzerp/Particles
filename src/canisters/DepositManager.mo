@@ -7,6 +7,7 @@ import Text "mo:base/Text";
 import Result "mo:base/Result";
 import Iter "mo:base/Iter";
 import Hash "mo:base/Hash";
+import Buffer "mo:base/Buffer";
 import Types "../types/Types";
 
 actor DepositManager {
@@ -101,16 +102,18 @@ actor DepositManager {
         nextDepositId
     };
     
-    // Get merkle proof for a deposit
-    // Note: This is a placeholder - in production, you'd need proper merkle proof generation
-    public query func getMerkleProof(depositId: Nat) : async Result.Result<[Text], Text> {
-        switch (deposits.get(depositId)) {
-            case null { #err("Deposit not found") };
-            case (?deposit) {
-                // In a real implementation, you'd generate the actual merkle proof
-                // For now, return a mock proof
-                #ok([deposit.commitment, "mock_sibling_1", "mock_sibling_2"])
+    // Get all commitments for merkle tree construction
+    // This is used by the frontend to build merkle trees and generate proofs locally
+    public query func getAllCommitments() : async [Text] {
+        var commitmentsList = Buffer.Buffer<Text>(nextDepositId);
+        
+        for (i in Iter.range(0, if (nextDepositId > 0) { nextDepositId - 1 } else { 0 })) {
+            switch (deposits.get(i)) {
+                case null { };
+                case (?d) { commitmentsList.add(d.commitment); };
             };
-        }
+        };
+        
+        Buffer.toArray(commitmentsList)
     };
 }

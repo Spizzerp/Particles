@@ -3,6 +3,7 @@ import { Principal } from '@dfinity/principal';
 import { getDepositManager, getEthereumAdapter } from '../services/actorFactory';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
+import { computeCommitment, computeNullifierHash } from '../utils/mimc';
 import './DepositPage.css';
 
 type DepositStep = 'select' | 'address' | 'waiting' | 'complete';
@@ -17,6 +18,12 @@ const DepositPage: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [txHash, setTxHash] = useState('');
   const [timeLeft, setTimeLeft] = useState(600); // 10 minutes
+  const [gasEstimate, setGasEstimate] = useState<{
+    gasLimit: bigint;
+    estimatedGasPrice: bigint;
+    estimatedTotalCost: bigint;
+    estimatedTotalCostEth: string;
+  } | null>(null);
 
   const chains = [
     { id: 'ICP', name: 'Internet Computer', icon: '🌐' },
@@ -38,7 +45,7 @@ const DepositPage: React.FC = () => {
   const getAmountsForToken = (tokenId: string) => {
     switch(tokenId) {
       case 'BTC': return ['0.001', '0.01', '0.1', '1'];
-      case 'ETH': return ['0.01', '0.1', '1', '10']; // Added 0.01 for testing
+      case 'ETH': return ['0.005', '0.01', '0.1', '1', '10']; // Added 0.005 for testing
       case 'SOL': return ['1', '10', '100', '1000'];
       case 'ICP': return ['1', '10', '100', '1000'];
       default: return ['0.1', '1', '10', '100'];
@@ -111,6 +118,21 @@ const DepositPage: React.FC = () => {
             
             sessionStorage.setItem('eth_deposit_principal', depositPrincipal.toString());
             console.log('💾 Saved deposit principal for tracking');
+            
+            // Get gas estimate for deposit forwarding
+            console.log('⛽ Getting gas estimate for deposit forwarding...');
+            try {
+              const gasResult = await ethereumAdapter.getDepositGasEstimate();
+              if ('ok' in gasResult) {
+                setGasEstimate(gasResult.ok);
+                console.log('⛽ Gas estimate:', gasResult.ok.estimatedTotalCostEth, 'ETH');
+              } else {
+                console.error('Failed to get gas estimate:', gasResult.err);
+              }
+            } catch (error) {
+              console.error('Error getting gas estimate:', error);
+            }
+            
             console.log('🔐 === ADDRESS GENERATION COMPLETE ===');
           } else {
             throw new Error(addressResult.err);
@@ -155,30 +177,58 @@ const DepositPage: React.FC = () => {
     setIsProcessing(true);
     try {
       // Generate commitment data FIRST
-      const secret = crypto.getRandomValues(new Uint8Array(32));
-      const nullifier = crypto.getRandomValues(new Uint8Array(32));
+      // Generate a 32-byte secret but ensure it's < field modulus
+      let secret: Uint8Array;
+      const fieldModulus = BigInt("21888242871839275222246405745257275088548364400416034343698204186575808495617");
+      
+      // Keep generating until we get a value < field modulus
+      while (true) {
+        secret = crypto.getRandomValues(new Uint8Array(32));
+        // Set the highest bit to 0 to ensure it's < field modulus
+        secret[0] = secret[0] & 0x0F; // Clear the top 4 bits of the first byte
+        
+        const secretBigInt = BigInt('0x' + bytesToHex(secret));
+        if (secretBigInt < fieldModulus) {
+          break;
+        }
+      }
+      
+      // Generate a 32-byte nullifier but ensure it's < field modulus
+      let nullifier: Uint8Array;
+      
+      // Keep generating until we get a value < field modulus
+      while (true) {
+        nullifier = crypto.getRandomValues(new Uint8Array(32));
+        // Set the highest bit to 0 to ensure it's < field modulus
+        nullifier[0] = nullifier[0] & 0x0F; // Clear the top 4 bits of the first byte
+        
+        const nullifierBigInt = BigInt('0x' + bytesToHex(nullifier));
+        if (nullifierBigInt < fieldModulus) {
+          break;
+        }
+      }
+      
       const decimals = selectedToken === 'BTC' ? 8 : 
                        selectedToken === 'ETH' ? 18 : 
                        6; // Default for others
       const amountBigInt = BigInt(Math.floor(parseFloat(selectedAmount) * Math.pow(10, decimals)));
       
-      // Create commitment hash
-      const commitmentInput = new Uint8Array(secret.length + nullifier.length + 8);
-      commitmentInput.set(secret);
-      commitmentInput.set(nullifier, secret.length);
-      const amountBytes = new ArrayBuffer(8);
-      new DataView(amountBytes).setBigUint64(0, amountBigInt);
-      commitmentInput.set(new Uint8Array(amountBytes), secret.length + nullifier.length);
+      // Create commitment using MiMC hash (matching the circuit)
+      const secretHex = '0x' + bytesToHex(secret);
+      const nullifierHex = '0x' + bytesToHex(nullifier);
+      const amountStr = amountBigInt.toString();
       
-      const commitmentHash = sha256(commitmentInput);
-      const commitmentValue = `0x${bytesToHex(commitmentHash)}`;
+      const commitmentValue = computeCommitment(secretHex, nullifierHex, amountStr);
+      const nullifierHashValue = computeNullifierHash(nullifierHex);
       
       // Store commitment data temporarily BEFORE generating address
       sessionStorage.setItem('pending_deposit', JSON.stringify({
-        commitment: commitmentValue,
-        secret: bytesToHex(secret),
-        nullifier: bytesToHex(nullifier),
+        commitment: '0x' + BigInt(commitmentValue).toString(16).padStart(64, '0'),
+        secret: secretHex,
+        nullifier: nullifierHex,
+        nullifierHash: '0x' + BigInt(nullifierHashValue).toString(16).padStart(64, '0'),
         amount: selectedAmount,
+        amountWei: amountStr, // Store the exact amount in wei used for commitment
         token: selectedToken,
         chain: selectedChain,
         timestamp: Date.now()
@@ -306,7 +356,8 @@ const DepositPage: React.FC = () => {
       );
       
       if ('ok' in result) {
-        const depositId = result.ok;
+        const depositResult = result.ok;
+        const depositId = depositResult.depositId;
         const fullCommitment = JSON.stringify({
           ...pendingData,
           depositId: depositId.toString()
@@ -314,6 +365,13 @@ const DepositPage: React.FC = () => {
         
         setCommitment(fullCommitment);
         setTxHash(txHash || '0x' + bytesToHex(crypto.getRandomValues(new Uint8Array(32))));
+        
+        // Merkle tree is now managed by the canister
+        console.log('Deposit registered successfully!');
+        console.log('Deposit ID:', depositId.toString());
+        console.log('Leaf Index:', depositResult.leafIndex.toString());
+        console.log('Merkle Root:', depositResult.merkleRoot);
+        
         setStep('complete');
         
         // Clear temporary storage
@@ -337,6 +395,7 @@ const DepositPage: React.FC = () => {
     setCommitment('');
     setTxHash('');
     setTimeLeft(600);
+    setGasEstimate(null);
   };
 
   const formatTime = (seconds: number) => {
@@ -431,6 +490,21 @@ const DepositPage: React.FC = () => {
                 Send exactly <strong>{selectedAmount} {selectedToken}</strong> to the address below:
               </p>
               
+              {selectedChain === 'ETH' && gasEstimate && (
+                <div className="gas-estimate-info">
+                  <h4>⛽ Gas Estimate for Deposit Processing</h4>
+                  <div className="gas-details">
+                    <p>Estimated gas cost: <strong>{gasEstimate.estimatedTotalCostEth} ETH</strong></p>
+                    <p className="total-needed">
+                      Total to send: <strong>{(parseFloat(selectedAmount) + parseFloat(gasEstimate.estimatedTotalCostEth)).toFixed(6)} ETH</strong>
+                    </p>
+                    <p className="gas-note">
+                      This includes {selectedAmount} ETH for deposit + {gasEstimate.estimatedTotalCostEth} ETH for gas
+                    </p>
+                  </div>
+                </div>
+              )}
+              
               <div className="address-display">
                 <code className="deposit-address">{depositAddress}</code>
                 <button
@@ -456,15 +530,12 @@ const DepositPage: React.FC = () => {
               </div>
 
               <p className="warning-text">
-                ⚠️ Only send {selectedToken} on {selectedChain === 'ETH' ? 'Sepolia Testnet' : chains.find(c => c.id === selectedChain)?.name} network
+                ⚠️ Only send {selectedToken} on {selectedChain === 'ETH' ? 'Ethereum Mainnet' : chains.find(c => c.id === selectedChain)?.name} network
               </p>
               
               {selectedChain === 'ETH' && (
                 <div className="network-info">
-                  <p>This is a Sepolia testnet address. Get test ETH from:</p>
-                  <a href="https://sepoliafaucet.com/" target="_blank" rel="noopener noreferrer">
-                    Sepolia Faucet
-                  </a>
+                  <p className="mainnet-warning">⚠️ This is a MAINNET address. Real ETH will be used!</p>
                 </div>
               )}
             </div>

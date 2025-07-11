@@ -1,0 +1,44 @@
+type TokenId = text;
+type Time = int;
+type Result_1 = 
+ variant {
+   err: text;
+   ok: vec text;
+ };
+type Result = 
+ variant {
+   err: text;
+   ok: DepositResult;
+ };
+type DepositResult = 
+ record {
+   depositId: nat;
+   leafIndex: nat;
+   merkleRoot: text;
+ };
+type Deposit = 
+ record {
+   amount: Amount;
+   chainId: ChainId;
+   commitment: CommitmentHash;
+   id: nat;
+   leafIndex: nat;
+   timestamp: Time;
+   tokenId: TokenId;
+   user: principal;
+ };
+type CommitmentHash = text;
+type ChainId = nat;
+type Amount = nat;
+service : {
+  deposit: (Amount, TokenId, ChainId, CommitmentHash) -> (Result);
+  getAllDeposits: () -> (vec Deposit) query;
+  getCommitmentsInOrder: () -> (vec text) query;
+  getCurrentMerkleRoot: () -> (text) query;
+  getDeposit: (nat) -> (opt Deposit) query;
+  getMerkleProof: (nat) -> (Result_1) query;
+  getTotalDeposits: () -> (nat) query;
+  getUserDeposits: (principal) -> (vec Deposit) query;
+  migrateDeposit: (nat, principal, nat, text, nat, text, int) -> (Result);
+  verifyMerkleProof: (text, nat, vec text, text) -> (bool) query;
+}

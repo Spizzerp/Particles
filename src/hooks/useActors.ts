@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Actor, HttpAgent } from '@dfinity/agent';
 import { Principal } from '@dfinity/principal';
-import { idlFactory as depositManagerIDL } from '../declarations/deposit_manager';
+import { idlFactory as depositManagerIDL } from '../declarations/deposit_manager_v2';
 import { idlFactory as withdrawalProcessorIDL } from '../declarations/withdrawal_processor';
 
 const canisterIds = {
-  depositManager: 'bd3sg-teaaa-aaaaa-qaaba-cai',
+  depositManager: 'rfun2-iaaaa-aaaac-qa7wq-cai', // Updated to deposit_manager_v2
   withdrawalProcessor: 'b77ix-eeaaa-aaaaa-qaada-cai'
 };
 
