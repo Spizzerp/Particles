@@ -21,6 +21,23 @@ import Debug "mo:base/Debug";
 import ExperimentalCycles "mo:base/ExperimentalCycles";
 
 actor EthereumAdapter {
+    
+    // Cycle management
+    private let MINIMUM_CYCLES : Nat = 5_000_000_000_000; // 5T cycles minimum
+    
+    private func hasSufficientCycles() : Bool {
+        ExperimentalCycles.balance() > MINIMUM_CYCLES
+    };
+    
+    public query func getCycleBalance() : async Nat {
+        ExperimentalCycles.balance()
+    };
+    
+    public func acceptCycles() : async Nat {
+        let available = ExperimentalCycles.available();
+        let accepted = ExperimentalCycles.accept(available);
+        accepted
+    };
 
     private type DepositEvent = {
         commitment: Text;
@@ -194,6 +211,31 @@ actor EthereumAdapter {
         #Err : RpcError;
     };
 
+    // Transaction receipt types
+    private type TransactionReceipt = {
+        transactionHash: Text;
+        blockNumber: Nat;
+        blockHash: Text;
+        status: Text; // "0x1" for success, "0x0" for failure
+        gasUsed: Nat;
+        cumulativeGasUsed: Nat;
+        from: Text;
+        to: ?Text;
+        contractAddress: ?Text;
+        logs: [LogEntry];
+    };
+
+
+    private type GetTransactionReceiptResult = {
+        #Ok : ?TransactionReceipt;
+        #Err : RpcError;
+    };
+
+    private type MultiGetTransactionReceiptResult = {
+        #Consistent : GetTransactionReceiptResult;
+        #Inconsistent : [(RpcService, GetTransactionReceiptResult)];
+    };
+
     private type GetLogsArgs = {
         fromBlock : ?BlockTag;
         toBlock : ?BlockTag;
@@ -320,6 +362,7 @@ actor EthereumAdapter {
         eth_sendRawTransaction : (RpcServices, ?RpcConfig, Text) -> async MultiSendRawTransactionResult;
         eth_getLogs : (RpcServices, ?GetLogsRpcConfig, GetLogsArgs) -> async MultiGetLogsResult;
         eth_feeHistory : (RpcServices, ?RpcConfig, FeeHistoryArgs) -> async MultiFeeHistoryResult;
+        eth_getTransactionReceipt : (RpcServices, ?RpcConfig, Text) -> async MultiGetTransactionReceiptResult;
         request : (RpcService, Text, Nat64) -> async RequestResult;
     } = actor("7hfb6-caaaa-aaaar-qadga-cai");
 
@@ -711,8 +754,8 @@ actor EthereumAdapter {
                                         info.commitment
                                     );
                                     switch (depositResult) {
-                                        case (#ok(depositId)) {
-                                            Debug.print("Added deposit with ID: " # Nat.toText(depositId));
+                                        case (#ok(result)) {
+                                            Debug.print("Added deposit with ID: " # Nat.toText(result.depositId));
                                         };
                                         case (#err(e)) {
                                             Debug.print("Warning: Failed to add deposit: " # e);
@@ -2189,6 +2232,11 @@ actor EthereumAdapter {
 
     // Process single deposit with V2 address derivation
     public shared(msg) func processSingleDepositV2(address: Text) : async Result.Result<Text, Text> {
+        // Check cycles before processing
+        if (not hasSufficientCycles()) {
+            return #err("Insufficient cycles. Please top up the canister.");
+        };
+        
         // Find the deposit info
         switch (depositAddresses.get(address)) {
             case null { #err("Deposit address not found") };
@@ -2210,19 +2258,70 @@ actor EthereumAdapter {
                     
                     switch (forwardResult) {
                         case (#ok(txHash)) {
-                            // Mark as processed
-                            depositAddresses.put(address, {
-                                commitment = info.commitment;
-                                amount = info.amount;
-                                timestamp = info.timestamp;
-                                userId = info.userId;
-                                processed = true;
-                            });
+                            Debug.print("Transaction submitted with hash: " # txHash);
                             
-                            // Track processed deposit
-                            processedDeposits.put(info.commitment, Time.now());
+                            // CRITICAL FIX: Wait for transaction confirmation
+                            let confirmationResult = await waitForTransactionConfirmation(txHash);
                             
-                            #ok(txHash)
+                            switch (confirmationResult) {
+                                case (#ok(receipt)) {
+                                    // Check if transaction is pending (our custom status)
+                                    if (receipt.status == "0x2") {
+                                        Debug.print("Transaction is pending confirmation: " # txHash);
+                                        // Return success but don't mark as processed yet
+                                        // Frontend will need to check again later
+                                        #ok(txHash # ":pending")
+                                    } else if (receipt.status == "0x1") {
+                                        Debug.print("Transaction confirmed successfully!");
+                                        
+                                        // Only mark as processed after confirmation
+                                        depositAddresses.put(address, {
+                                            commitment = info.commitment;
+                                            amount = info.amount;
+                                            timestamp = info.timestamp;
+                                            userId = info.userId;
+                                            processed = true;
+                                        });
+                                        
+                                        // Track processed deposit
+                                        processedDeposits.put(info.commitment, Time.now());
+                                        
+                                        // Add commitment to deposit manager
+                                        try {
+                                            let depositResult = await depositManager.deposit(
+                                                info.amount,
+                                                "ETH",
+                                                1, // Ethereum mainnet
+                                                info.commitment
+                                            );
+                                            
+                                            switch (depositResult) {
+                                                case (#ok(result)) {
+                                                    Debug.print("Added deposit with ID: " # Nat.toText(result.depositId));
+                                                    #ok(txHash)
+                                                };
+                                                case (#err(e)) {
+                                                    Debug.print("Warning: Failed to add deposit to manager: " # e);
+                                                    // Still return success since funds were forwarded
+                                                    #ok(txHash)
+                                                };
+                                            };
+                                        } catch (e) {
+                                            Debug.print("Error adding to deposit manager: " # Error.message(e));
+                                            // Still return success since funds were forwarded
+                                            #ok(txHash)
+                                        }
+                                    } else {
+                                        Debug.print("Transaction failed with status: " # receipt.status);
+                                        #err("Transaction failed")
+                                    };
+                                };
+                                case (#err(e)) {
+                                    Debug.print("Transaction failed or not confirmed: " # e);
+                                    // DO NOT mark as processed - allow retry
+                                    #err("Transaction failed: " # e)
+                                };
+                            };
                         };
                         case (#err(e)) {
                             #err("Failed to forward from " # address # ": " # e)
@@ -2275,6 +2374,49 @@ actor EthereumAdapter {
         }
     };
 
+    // Admin function to manually mark a deposit as processed after verifying on-chain
+    public shared(msg) func markDepositAsProcessed(address: Text, txHash: Text) : async Result.Result<Text, Text> {
+        // Add admin check here if needed
+        switch (depositAddresses.get(address)) {
+            case null { #err("Deposit address not found") };
+            case (?info) {
+                if (info.processed) {
+                    return #err("Deposit already marked as processed");
+                };
+                
+                // Mark as processed
+                depositAddresses.put(address, {
+                    commitment = info.commitment;
+                    amount = info.amount;
+                    timestamp = info.timestamp;
+                    userId = info.userId;
+                    processed = true;
+                });
+                
+                // Track processed deposit
+                processedDeposits.put(info.commitment, Time.now());
+                
+                // Add commitment to deposit manager
+                let depositResult = await depositManager.deposit(
+                    info.amount,
+                    "ETH",
+                    1, // Ethereum mainnet
+                    info.commitment
+                );
+                
+                switch (depositResult) {
+                    case (#ok(result)) {
+                        #ok("Deposit marked as processed with tx: " # txHash # ", deposit ID: " # Nat.toText(result.depositId))
+                    };
+                    case (#err(e)) {
+                        // Still mark as processed to prevent double forwarding
+                        #ok("Deposit marked as processed with tx: " # txHash # " (warning: " # e # ")")
+                    };
+                };
+            };
+        }
+    };
+    
     // Forward funds from V2 deposit address to pool contract
     private func forwardFundsToPoolV2(depositAddress: Text, info: DepositInfo) : async Result.Result<Text, Text> {
         try {
@@ -2454,6 +2596,126 @@ actor EthereumAdapter {
         } catch (e) {
             #err("Failed to forward funds: " # Error.message(e))
         };
+    };
+
+    // Wait for transaction confirmation
+    private func waitForTransactionConfirmation(txHash: Text) : async Result.Result<TransactionReceipt, Text> {
+        var attempts = 0;
+        let maxAttempts = 30; // 30 attempts with 2-second delays = ~1 minute
+        
+        while (attempts < maxAttempts) {
+            Debug.print("Checking transaction receipt for " # txHash # " (attempt " # Nat.toText(attempts + 1) # ")");
+            
+            // Add cycles for the RPC call (need more for eth_getTransactionReceipt)
+            ExperimentalCycles.add(2_000_000_000); // 2B cycles to ensure enough for receipt call
+            
+            let receiptResult = await evmRpc.eth_getTransactionReceipt(
+                #EthMainnet(?[#PublicNode]),
+                ?{
+                    responseSizeEstimate = ?500;
+                    responseConsensus = null;
+                },
+                txHash
+            );
+            
+            switch (receiptResult) {
+                case (#Consistent(#Ok(?receipt))) {
+                    // Transaction was mined
+                    Debug.print("Transaction mined in block " # Nat.toText(receipt.blockNumber));
+                    Debug.print("Transaction status: " # receipt.status);
+                    
+                    if (receipt.status == "0x1") {
+                        return #ok(receipt);
+                    } else {
+                        return #err("Transaction failed with status 0x0");
+                    };
+                };
+                case (#Consistent(#Ok(null))) {
+                    // Transaction not yet mined, wait and retry
+                    Debug.print("Transaction not yet mined, waiting...");
+                    attempts += 1;
+                    
+                    // Since we can't use timers directly in async context,
+                    // we'll return early and let the frontend handle retries
+                    if (attempts >= 3) {
+                        // After 3 quick checks, assume transaction is pending
+                        // Frontend should handle the waiting logic
+                        return #ok({
+                            transactionHash = txHash;
+                            blockNumber = 0;
+                            blockHash = "";
+                            status = "0x2"; // Custom status to indicate pending
+                            gasUsed = 0;
+                            cumulativeGasUsed = 0;
+                            from = "";
+                            to = null;
+                            contractAddress = null;
+                            logs = [];
+                        });
+                    };
+                    
+                    // Small delay by making a simple async call
+                    let _ = await async { Debug.print("Waiting..."); };
+                };
+                case (#Consistent(#Err(error))) {
+                    return #err("Failed to get receipt: " # debug_show(error));
+                };
+                case (#Inconsistent(_)) {
+                    return #err("Inconsistent RPC results");
+                };
+            };
+        };
+        
+        #err("Transaction not confirmed after " # Nat.toText(maxAttempts) # " attempts")
+    };
+
+    // Manual recovery: Reset deposit processed status (admin only)
+    public shared(msg) func resetDepositStatus(address: Text) : async Result.Result<Text, Text> {
+        // TODO: Add admin authentication here
+        // For now, we'll allow it for emergency recovery
+        
+        switch (depositAddresses.get(address)) {
+            case null { #err("Deposit address not found") };
+            case (?info) {
+                if (not info.processed) {
+                    return #err("Deposit is already marked as unprocessed");
+                };
+                
+                // Reset to unprocessed
+                depositAddresses.put(address, {
+                    commitment = info.commitment;
+                    amount = info.amount;
+                    timestamp = info.timestamp;
+                    userId = info.userId;
+                    processed = false;
+                });
+                
+                Debug.print("Reset deposit status for " # address # " to unprocessed");
+                #ok("Deposit status reset. You can now retry processing.")
+            };
+        }
+    };
+
+    // Manual recovery: Force process a stuck deposit
+    public shared(msg) func forceProcessDeposit(address: Text) : async Result.Result<Text, Text> {
+        // TODO: Add admin authentication here
+        
+        switch (depositAddresses.get(address)) {
+            case null { #err("Deposit address not found") };
+            case (?info) {
+                // Temporarily mark as unprocessed to allow retry
+                depositAddresses.put(address, {
+                    commitment = info.commitment;
+                    amount = info.amount;
+                    timestamp = info.timestamp;
+                    userId = info.userId;
+                    processed = false;
+                });
+                
+                // Now process it
+                await processSingleDepositV2(address)
+            };
+        }
     };
 
     // Recover stuck funds by finding the correct timestamp

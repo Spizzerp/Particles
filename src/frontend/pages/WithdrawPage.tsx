@@ -5,7 +5,8 @@ import {
   generateWithdrawalProof, 
   formatRecipientAddress,
   estimateWithdrawalFees,
-  DepositData
+  DepositData,
+  WithdrawalProof
 } from '../services/zkProofService';
 import { formatAmount } from '../utils/crypto';
 import ProofStatus from '../components/ProofStatus';
@@ -103,13 +104,20 @@ const WithdrawPage: React.FC = () => {
       let merkleRoot = Array.isArray(merkleRootResult) ? merkleRootResult[0] : merkleRootResult;
       console.log('Merkle root fetched:', merkleRoot, 'Type:', typeof merkleRoot);
       
+      // Get total deposits to check for edge cases
+      const totalDeposits = await depositManager.getTotalDeposits();
+      console.log('Total deposits in system:', totalDeposits.toString());
+      
+      // The merkle root is now correctly computed in the canister
+      console.log('Using merkle root:', merkleRoot);
+      
       // Use the deposit's leafIndex
       const leafIndex = Number(deposit.leafIndex);
       console.log('Using leaf index from deposit:', leafIndex);
       
       // Get merkle proof from the canister
       console.log('Fetching merkle proof from canister for leaf index', leafIndex);
-      const merkleProofResult = await depositManager.getMerkleProof(deposit.leafIndex);
+      const merkleProofResult = await depositManager.getMerkleProof(depositId);
       
       if ('err' in merkleProofResult) {
         throw new Error(`Failed to get merkle proof: ${merkleProofResult.err}`);
@@ -127,7 +135,7 @@ const WithdrawPage: React.FC = () => {
         withdrawalProof = await generateWithdrawalProof(
           depositData,
           formattedRecipient,
-          merkleRoot,
+          merkleRoot, // Use the appropriate root for the proof
           merkleProof,
           leafIndex // Pass the leaf index we found
         );
@@ -145,20 +153,44 @@ const WithdrawPage: React.FC = () => {
       setWithdrawalStatus('Submitting withdrawal transaction...');
       const withdrawalProcessor = await getWithdrawalProcessor();
       
-      // Create PLONK proof object matching the expected format
-      // The withdrawalProof must contain a valid PLONK proof from the client-side prover
+      // The withdrawalProof already contains a valid PLONK proof in the full gnark format
       if (!withdrawalProof.proof || !withdrawalProof.proof.lro) {
         throw new Error('Invalid proof generated');
       }
       
-      const plonkProof = {
-        lro: withdrawalProof.proof.lro,
-        z: withdrawalProof.proof.z,
-        h1: withdrawalProof.proof.h1,
-        h2: withdrawalProof.proof.h2,
-        wire_values_at_z: withdrawalProof.proof.wire_values_at_z,
-        wire_values_at_z_omega: withdrawalProof.proof.wire_values_at_z_omega
+      // Log the proof structure for debugging
+      console.log('PLONK proof structure:');
+      console.log('- lro points:', (withdrawalProof.proof as any).lro.length);
+      console.log('- z point:', (withdrawalProof.proof as any).z);
+      console.log('- h array:', (withdrawalProof.proof as any).h?.length || 'N/A');
+      console.log('- bsb22_commitments:', (withdrawalProof.proof as any).bsb22_commitments?.length || 'N/A');
+      console.log('- batched_proof.claimed_values:', (withdrawalProof.proof as any).batched_proof?.claimed_values?.length || 'N/A');
+      
+      // Format public signals to ensure they're all valid for BigInt conversion
+      // The canister expects all values to be parseable as BigInt
+      const formatSignalForBigInt = (signal: string): string => {
+        // Remove 0x prefix if present
+        const cleanSignal = signal.startsWith('0x') ? signal.slice(2) : signal;
+        
+        // If it's already a decimal number, return as-is
+        if (/^\d+$/.test(cleanSignal)) {
+          return cleanSignal;
+        }
+        
+        // If it's hex, convert to decimal
+        if (/^[0-9a-fA-F]+$/.test(cleanSignal)) {
+          return BigInt('0x' + cleanSignal).toString();
+        }
+        
+        throw new Error(`Invalid signal format: ${signal}`);
       };
+      
+      // Log the public signals for debugging
+      if (withdrawalProof.publicSignals) {
+        console.log('Raw public signals:', withdrawalProof.publicSignals);
+        const formattedSignals = withdrawalProof.publicSignals.map(formatSignalForBigInt);
+        console.log('Formatted public signals:', formattedSignals);
+      }
       
       // Convert amount to wei if it's in ETH format
       let amountInWei: bigint;
@@ -179,14 +211,58 @@ const WithdrawPage: React.FC = () => {
       // Use the pre-computed nullifierHash if available
       const nullifierHashToUse = depositData.nullifierHash || withdrawalProof.nullifier;
       
+      // Map chain names to chain IDs
+      const getChainId = (chain: string): bigint => {
+        const chainMap: { [key: string]: bigint } = {
+          'ETH': 1n,        // Ethereum mainnet
+          'ethereum': 1n,
+          '1': 1n,
+          'ICP': 0n,        // ICP uses 0 as chain ID
+          'BTC': 0n,        // Bitcoin (not EVM)
+          '137': 137n,      // Polygon
+          '42161': 42161n,  // Arbitrum
+        };
+        
+        const normalizedChain = chain.toLowerCase();
+        if (chainMap[normalizedChain] !== undefined) {
+          return chainMap[normalizedChain];
+        }
+        if (chainMap[chain] !== undefined) {
+          return chainMap[chain];
+        }
+        
+        // Try to parse as number if not in map
+        try {
+          return BigInt(chain);
+        } catch {
+          console.warn(`Unknown chain: ${chain}, defaulting to Ethereum mainnet (1)`);
+          return 1n; // Default to Ethereum mainnet
+        }
+      };
+      
+      const chainId = getChainId(withdrawalProof.chainId || depositData.chain || selectedChain);
+      
+      // Debug log all parameters before sending to canister
+      console.log('=== CANISTER CALL PARAMETERS ===');
+      console.log('nullifierHash:', nullifierHashToUse);
+      console.log('recipient:', formattedRecipient);
+      console.log('amount:', amountInWei.toString());
+      console.log('token:', depositData.token);
+      console.log('chainId:', chainId.toString());
+      console.log('merkleRoot:', merkleRoot);
+      console.log('merkleRoot type:', typeof merkleRoot);
+      console.log('Is merkleRoot array?', Array.isArray(merkleRoot));
+      
+      // IMPORTANT: Always use the original merkle root from the canister
+      // The withdrawal processor validates against what's stored in deposit manager
       const result = await withdrawalProcessor.initiateWithdrawal(
         nullifierHashToUse,
         formattedRecipient,
         amountInWei,
         depositData.token,
-        BigInt(withdrawalProof.chainId || selectedChain),
-        merkleRoot,
-        plonkProof
+        chainId,
+        merkleRoot, // Use the original root, not actualRoot
+        withdrawalProof.proof
       );
 
       if ('ok' in result) {

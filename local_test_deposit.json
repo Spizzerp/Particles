@@ -1,0 +1,9 @@
+{
+  "depositId": "0",
+  "secret": "0xa55f7ef2ed6f961425306a2fd56eeea84c31d1b624e8a203f4bb0b531486d8a1",
+  "nullifier": "0x7f7fcf316c529d83897e0f73a6b22e830bd07a25557478581c001bb6f11f2223",
+  "amount": "0.001",
+  "amountWei": "1000000000000000",
+  "commitment": "0x090e148dfe7bde9cf4be8511ee1eaef0a3d1f9c8b3c30134a8a28cc97dbf7df4",
+  "timestamp": 1752312771938
+}

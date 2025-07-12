@@ -41,7 +41,7 @@ export interface ZKProof {
   publicSignals: string[];
 }
 
-// PLONK Proof type
+// PLONK Proof type (simplified format)
 export interface PlonkProof {
   lro: [string, string][];
   z: [string, string];
@@ -49,6 +49,22 @@ export interface PlonkProof {
   h2: [string, string];
   wire_values_at_z: string[];
   wire_values_at_z_omega: string[];
+}
+
+// Full Gnark PLONK Proof type (as expected by canister)
+export interface GnarkPlonkProof {
+  lro: [string, string][];
+  z: [string, string];
+  h: [string, string][];
+  bsb22_commitments: [string, string][];
+  batched_proof: {
+    h: [string, string];
+    claimed_values: string[];
+  };
+  zshifted_proof: {
+    h: [string, string];
+    claimed_value: string;
+  };
 }
 
 // Witness data for proof generation
@@ -113,6 +129,8 @@ export interface DepositManagerService {
     proof: string[],
     root: string
   ) => Promise<boolean>;
+  getCycleBalance: () => Promise<bigint>;
+  acceptCycles: () => Promise<bigint>;
   migrateDeposit: (
     id: bigint,
     user: Principal,
@@ -133,7 +151,7 @@ export interface WithdrawalProcessorService {
     tokenId: TokenId,
     chainId: ChainId,
     merkleRoot: MerkleRoot,
-    proof: PlonkProof
+    proof: GnarkPlonkProof
   ) => Promise<Result<bigint, string>>;
   processWithdrawal: (withdrawalId: bigint) => Promise<Result<null, string>>;
   batchProcessWithdrawals: (withdrawalIds: bigint[]) => Promise<Result<bigint[], string>>;

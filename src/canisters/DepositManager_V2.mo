@@ -8,6 +8,7 @@ import Result "mo:base/Result";
 import Iter "mo:base/Iter";
 import Hash "mo:base/Hash";
 import Buffer "mo:base/Buffer";
+import Cycles "mo:base/ExperimentalCycles";
 import Types "../types/Types";
 import MerkleTree "./MerkleTree";
 import MiMC "./MiMC_BN254";
@@ -49,6 +50,10 @@ actor DepositManager {
         chainId: Types.ChainId,
         commitment: Types.CommitmentHash
     ) : async Result.Result<Types.DepositResult, Text> {
+        // Check cycles before processing
+        if (not hasSufficientCycles()) {
+            return #err("Insufficient cycles. Please top up the canister.");
+        };
         let depositId = nextDepositId;
         nextDepositId += 1;
         
@@ -143,6 +148,26 @@ actor DepositManager {
         merkleTree.size()
     };
     
+    // Cycle management functions
+    private let MINIMUM_CYCLES : Nat = 5_000_000_000_000; // 5T cycles minimum
+    
+    // Check if canister has enough cycles
+    private func hasSufficientCycles() : Bool {
+        Cycles.balance() > MINIMUM_CYCLES
+    };
+    
+    // Get current cycle balance
+    public query func getCycleBalance() : async Nat {
+        Cycles.balance()
+    };
+    
+    // Accept incoming cycles
+    public func acceptCycles() : async Nat {
+        let available = Cycles.available();
+        let accepted = Cycles.accept(available);
+        accepted
+    };
+    
     // Migration method - REMOVE AFTER MIGRATION IS COMPLETE
     public shared(msg) func migrateDeposit(
         id: Nat,
@@ -194,5 +219,26 @@ actor DepositManager {
             leafIndex = leafIndex;
             merkleRoot = merkleTree.getRoot();
         })
+    };
+    
+    // Admin function to reset the merkle tree (use with extreme caution!)
+    public shared(msg) func resetMerkleTree() : async Result.Result<Text, Text> {
+        // Add authorization check here - for now using a hardcoded principal
+        // In production, this should check against a proper admin list
+        let adminPrincipal = Principal.fromText("7gv5g-5n7sv-xvrux-xd5ga-qqmua-h6mwy-2x2va-ywldy-2rhrq-evu5r-3ae");
+        
+        if (msg.caller != adminPrincipal) {
+            return #err("Unauthorized: Only admin can reset the merkle tree");
+        };
+        
+        // Clear all data
+        deposits := Map.HashMap<Nat, Types.Deposit>(10, Nat.equal, Hash.hash);
+        userDeposits := Map.HashMap<Principal, [Nat]>(10, Principal.equal, Principal.hash);
+        nextDepositId := 0;
+        
+        // Reset merkle tree
+        merkleTree := MerkleTree.MerkleTree(MiMC.hashTwo);
+        
+        #ok("Merkle tree and all deposits have been reset. Tree is now empty.")
     };
 }

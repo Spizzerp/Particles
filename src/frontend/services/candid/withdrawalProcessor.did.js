@@ -16,6 +16,21 @@ export const idlFactory = ({ IDL }) => {
     publicSignals: IDL.Vec(IDL.Text),
   });
   
+  const PlonkProof = IDL.Record({
+    h: IDL.Vec(IDL.Tuple(IDL.Text, IDL.Text)),
+    z: IDL.Tuple(IDL.Text, IDL.Text),
+    lro: IDL.Vec(IDL.Tuple(IDL.Text, IDL.Text)),
+    zshifted_proof: IDL.Record({
+      h: IDL.Tuple(IDL.Text, IDL.Text),
+      claimed_value: IDL.Text,
+    }),
+    bsb22_commitments: IDL.Vec(IDL.Tuple(IDL.Text, IDL.Text)),
+    batched_proof: IDL.Record({
+      h: IDL.Tuple(IDL.Text, IDL.Text),
+      claimed_values: IDL.Vec(IDL.Text),
+    }),
+  });
+  
   const Withdrawal = IDL.Record({
     id: IDL.Nat,
     nullifier: NullifierHash,
@@ -52,7 +67,7 @@ export const idlFactory = ({ IDL }) => {
   // Define the service interface
   return IDL.Service({
     initiateWithdrawal: IDL.Func(
-      [NullifierHash, IDL.Text, Amount, TokenId, ChainId, MerkleRoot, ZKProof],
+      [NullifierHash, IDL.Text, Amount, TokenId, ChainId, MerkleRoot, PlonkProof],
       [Result],
       []
     ),

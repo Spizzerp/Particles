@@ -2,6 +2,7 @@ import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
 import { Principal } from '@dfinity/principal';
 import { plonkProverService } from './plonkProverService';
+import { GnarkPlonkProof } from './types';
 
 export interface WithdrawalProof {
   nullifier: string;
@@ -11,15 +12,9 @@ export interface WithdrawalProof {
   recipient: string;
   amount: string;
   chainId: string;
-  // PLONK proof format
-  proof: {
-    lro: [string, string][];
-    z: [string, string];
-    h1: [string, string];
-    h2: [string, string];
-    wire_values_at_z: string[];
-    wire_values_at_z_omega: string[];
-  };
+  // PLONK proof format (full gnark structure)
+  proof: GnarkPlonkProof;
+  publicSignals?: string[]; // Add public signals
 }
 
 export interface DepositData {
@@ -119,15 +114,18 @@ export async function generateWithdrawalProof(
     index
   );
   
+  // Return the proof in the format expected by the canister
+  // The proof should already be in the full gnark format from the parser
   return {
-    nullifier: nullifierHash,
+    nullifier: depositData.nullifier,
     commitment: depositData.commitment,
     merkleRoot,
     merkleProof,
     recipient,
     amount: depositData.amount,
-    chainId: depositData.chain,
-    proof: generatedProof.proof
+    chainId: '1', // Default to Ethereum mainnet
+    proof: generatedProof.proof,
+    publicSignals: generatedProof.publicSignals
   };
 }
 

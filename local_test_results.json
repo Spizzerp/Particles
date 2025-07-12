@@ -1,0 +1,9 @@
+{
+  "depositId": "0",
+  "commitment": "0x090e148dfe7bde9cf4be8511ee1eaef0a3d1f9c8b3c30134a8a28cc97dbf7df4",
+  "merkleRoot": "0x090e148dfe7bde9cf4be8511ee1eaef0a3d1f9c8b3c30134a8a28cc97dbf7df4",
+  "merkleProofLength": 20,
+  "nullifierHash": "0x74adeefb91e92061f8fa410eead4c2475c68e77e35b787cdcb23347364f7a2ac",
+  "formulaVerified": "MiMC(secret, nullifier, amount)",
+  "timestamp": 1752313558760
+}

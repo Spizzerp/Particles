@@ -9,6 +9,10 @@
       "type": "motoko",
       "main": "src/canisters/DepositManager_V2.mo"
     },
+    "cycle_monitor": {
+      "type": "motoko",
+      "main": "src/canisters/CycleMonitor.mo"
+    },
     "withdrawal_processor": {
       "type": "motoko",
       "main": "src/canisters/WithdrawalProcessor.mo"

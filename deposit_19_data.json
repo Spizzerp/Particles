@@ -1,0 +1,13 @@
+{
+  "commitment": "0x0d60aa0ca9188c926bc28e5c8e2b4a0adfe3a3e064102a86872a984cba35367a",
+  "secret": "0x0573cf67dab1dc5d5a62dfdd786546d1572728fa2f8b168362e815eff5bb6bb1",
+  "nullifier": "0x0409a1a4604b2395bc994bd4bf41be4835712e0ec7fc3cad78c5b987603ef100",
+  "nullifierHash": "0x274e6f75826126e11431a2d3fd38875493a199a4fc14393a6f5b5f8e8cb7eda0",
+  "amount": "0.005",
+  "amountWei": "5000000000000000",
+  "token": "ETH",
+  "chain": "ETH",
+  "timestamp": 1752297257888,
+  "address": "0x615d9066545aab8d52067b1edab78d65640fcf49",
+  "depositId": "19"
+}

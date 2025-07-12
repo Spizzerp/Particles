@@ -3,7 +3,7 @@ import { IDL } from '@dfinity/candid';
 import { Principal } from '@dfinity/principal';
 import { CANISTER_IDS, IC_HOST, IS_LOCAL } from './config';
 import { idlFactory as depositManagerIDL } from '../../declarations/deposit_manager_v2';
-import { idlFactory as withdrawalProcessorIDL } from './candid/withdrawalProcessor.did.js';
+import { idlFactory as withdrawalProcessorIDL } from '../../declarations/withdrawal_processor';
 import type {
   DepositManagerService,
   WithdrawalProcessorService,
@@ -170,6 +170,8 @@ export const getEthereumAdapterActor = async (identity?: Identity): Promise<Acto
         }), 
         err: IDL.Text 
       })], []),
+      getCycleBalance: IDL.Func([], [IDL.Nat], ['query']),
+      acceptCycles: IDL.Func([], [IDL.Nat], []),
     });
   };
 

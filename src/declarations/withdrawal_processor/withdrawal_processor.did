@@ -34,11 +34,6 @@ type Withdrawal =
  };
 type TokenId = text;
 type Time = int;
-type Result_2 = 
- variant {
-   err: text;
-   ok: vec nat;
- };
 type Result_1 = 
  variant {
    err: text;
@@ -49,57 +44,56 @@ type Result =
    err: text;
    ok;
  };
-type NullifierHash = text;
-type MerkleRoot = text;
-type ChainId = nat;
-type Amount = nat;
 type PlonkProof = 
  record {
+   batched_proof: record {
+                    claimed_values: vec text;
+                    h: record {
+                         text;
+                         text;
+                       };
+                  };
+   bsb22_commitments: vec record {
+                            text;
+                            text;
+                          };
+   h: vec record {
+            text;
+            text;
+          };
    lro: vec record {
-        text;
-        text;
-      };
+              text;
+              text;
+            };
    z: record {
         text;
         text;
       };
-   h: vec record {
-        text;
-        text;
-      };
-   batched_proof: record {
-        h: record {
-          text;
-          text;
-        };
-        claimed_values: vec text;
-      };
    zshifted_proof: record {
-        h: record {
-          text;
-          text;
-        };
-        claimed_value: text;
-      };
-   bsb22_commitments: vec record {
-        text;
-        text;
-      };
+                     claimed_value: text;
+                     h: record {
+                          text;
+                          text;
+                        };
+                   };
  };
+type NullifierHash = text;
+type MerkleRoot = text;
+type ChainId = nat;
+type Amount = nat;
 service : {
-  batchProcessWithdrawals: (vec nat) -> (Result_2);
   getPendingWithdrawals: () -> (vec Withdrawal) query;
   getProcessedWithdrawals: () -> (vec Withdrawal) query;
-  getWithdrawal: (nat) -> (opt Withdrawal) query;
-  getWithdrawalStats: () ->
+  getVerificationCost: () ->
    (record {
-      pending: nat;
-      processed: nat;
-      total: nat;
+      cycles: nat;
+      instructions: nat;
+      usdCost: float64;
     }) query;
-  getWithdrawalsByChain: (ChainId) -> (vec Withdrawal) query;
+  getWithdrawal: (nat) -> (opt Withdrawal) query;
   initiateWithdrawal: (NullifierHash, text, Amount, TokenId, ChainId,
    MerkleRoot, PlonkProof) -> (Result_1);
   isNullifierUsed: (NullifierHash) -> (bool) query;
   processWithdrawal: (nat) -> (Result);
+  setPlonkVerificationKey: (vec nat8) -> (Result);
 }

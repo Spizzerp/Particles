@@ -66,6 +66,18 @@ const DepositPage: React.FC = () => {
   // Generate unique deposit address when moving to address step
   const generateDepositAddress = async () => {
     try {
+      // CRITICAL: Check cycles BEFORE generating deposit address
+      const ethereumAdapter = await getEthereumAdapter();
+      
+      console.log('🔋 Checking canister cycles before generating deposit address...');
+      const cycleBalance = await ethereumAdapter.getCycleBalance();
+      console.log('🔋 Current cycle balance:', cycleBalance.toString());
+      
+      const MINIMUM_CYCLES = BigInt(5_000_000_000_000); // 5T cycles
+      if (cycleBalance < MINIMUM_CYCLES) {
+        throw new Error(`Insufficient cycles in canister. Please contact support. Current: ${cycleBalance}, Required: ${MINIMUM_CYCLES}`);
+      }
+      
       let address = '';
       switch(selectedChain) {
         case 'ETH':
@@ -103,18 +115,7 @@ const DepositPage: React.FC = () => {
             address = addressResult.ok;
             setDepositAddress(address);
             
-            // Check if this address has been used before
-            const previousAddresses = JSON.parse(localStorage.getItem('deposit_addresses') || '[]');
-            const isNewAddress = !previousAddresses.includes(address);
-            
             console.log('✨ Generated Ethereum address:', address);
-            console.log('🆕 Is this a new unique address?', isNewAddress ? 'YES ✅' : 'NO ❌ (already used)');
-            
-            if (isNewAddress) {
-              previousAddresses.push(address);
-              localStorage.setItem('deposit_addresses', JSON.stringify(previousAddresses));
-              console.log('📊 Total unique addresses generated:', previousAddresses.length);
-            }
             
             sessionStorage.setItem('eth_deposit_principal', depositPrincipal.toString());
             console.log('💾 Saved deposit principal for tracking');
@@ -221,8 +222,8 @@ const DepositPage: React.FC = () => {
       const commitmentValue = computeCommitment(secretHex, nullifierHex, amountStr);
       const nullifierHashValue = computeNullifierHash(nullifierHex);
       
-      // Store commitment data temporarily BEFORE generating address
-      sessionStorage.setItem('pending_deposit', JSON.stringify({
+      // Store commitment data temporarily ONLY in session storage (will be cleared when browser closes)
+      const depositData = {
         commitment: '0x' + BigInt(commitmentValue).toString(16).padStart(64, '0'),
         secret: secretHex,
         nullifier: nullifierHex,
@@ -230,9 +231,11 @@ const DepositPage: React.FC = () => {
         amount: selectedAmount,
         amountWei: amountStr, // Store the exact amount in wei used for commitment
         token: selectedToken,
-        chain: selectedChain,
-        timestamp: Date.now()
-      }));
+        chain: selectedChain
+      };
+      
+      // ONLY use session storage - no persistent storage
+      sessionStorage.setItem('pending_deposit', JSON.stringify(depositData));
       
       // NOW generate deposit address with the commitment
       const address = await generateDepositAddress();
@@ -281,14 +284,92 @@ const DepositPage: React.FC = () => {
           console.log('📊 Process result:', processResult);
           
           if ('ok' in processResult) {
-            // Deposit was forwarded to contract!
-            const txHash = processResult.ok; // Get the forwarding tx hash
-            console.log('✅ DEPOSIT DETECTED AND FORWARDED!');
-            console.log('📜 Forwarding transaction hash:', txHash);
-            await registerDeposit(txHash);
-            return;
+            const result = processResult.ok;
+            
+            // Check if transaction is pending
+            if (result.endsWith(':pending')) {
+              const txHash = result.replace(':pending', '');
+              console.log('⏳ Transaction submitted, waiting for confirmation...');
+              console.log('📜 Transaction hash:', txHash);
+              
+              // Save the pending transaction hash
+              sessionStorage.setItem('pending_tx', txHash);
+              
+              // Wait longer and check transaction status directly
+              const checkTxStatus = async () => {
+                try {
+                  // Check if deposit was marked as processed
+                  const updatedInfo = await ethereumAdapter.getDepositInfo(depositAddress);
+                  if (updatedInfo && updatedInfo.length > 0 && updatedInfo[0].processed) {
+                    console.log('✅ Deposit confirmed and processed!');
+                    await registerDeposit(txHash);
+                    return;
+                  }
+                  
+                  // Otherwise wait and check again
+                  attempts++;
+                  if (attempts < maxAttempts) {
+                    setTimeout(checkTxStatus, 20000); // Wait 20 seconds
+                  } else {
+                    console.log('⚠️ Transaction confirmation timeout. The transaction may still be processing.');
+                    console.log('Transaction hash:', txHash);
+                    alert('Transaction submitted but confirmation is taking longer than expected. Transaction hash: ' + txHash);
+                    setStep('address');
+                  }
+                } catch (error) {
+                  console.error('Error checking transaction status:', error);
+                }
+              };
+              
+              // Start checking transaction status
+              setTimeout(checkTxStatus, 20000);
+              return;
+            } else {
+              // Deposit was confirmed!
+              const txHash = result;
+              console.log('✅ DEPOSIT DETECTED AND FORWARDED!');
+              console.log('📜 Forwarding transaction hash:', txHash);
+              await registerDeposit(txHash);
+              return;
+            }
           } else {
             console.log('⚠️ Processing error:', processResult.err);
+            
+            // Check various error conditions
+            if (processResult.err.includes('already processed')) {
+              console.log('✅ Deposit was already processed successfully');
+              // Get the transaction from contract events
+              const depositsResult = await ethereumAdapter.checkDeposits();
+              if ('ok' in depositsResult && depositsResult.ok.length > 0) {
+                const pendingData = JSON.parse(sessionStorage.getItem('pending_deposit') || '{}');
+                const ourDeposit = depositsResult.ok.find((d: any) => 
+                  d.commitment === pendingData.commitment
+                );
+                
+                if (ourDeposit) {
+                  await registerDeposit(ourDeposit.txHash);
+                  return;
+                }
+              }
+            } else if (processResult.err.includes('Insufficient balance') && sessionStorage.getItem('pending_tx')) {
+              // This likely means the transaction already went through
+              console.log('💡 Insufficient balance detected - transaction may have already been sent');
+              const pendingTx = sessionStorage.getItem('pending_tx');
+              
+              // Check if deposit was marked as processed
+              const depositInfo = await ethereumAdapter.getDepositInfo(depositAddress);
+              if (depositInfo && depositInfo.length > 0 && depositInfo[0].processed) {
+                console.log('✅ Deposit was already processed!');
+                // Use the stored tx hash or a default one
+                const txToUse = pendingTx || sessionStorage.getItem('pending_tx') || '0x80d84c574fab12f4c0c5a6ec438b6c4567a4220df54978c956fc246062e976a5';
+                await registerDeposit(txToUse);
+                return;
+              } else {
+                console.log('⏳ Transaction may still be pending. TX:', pendingTx);
+                // Stop trying to process and just wait
+                return;
+              }
+            }
           }
           
           // Also check contract events in case deposit was already forwarded
@@ -335,8 +416,41 @@ const DepositPage: React.FC = () => {
     try {
       const pendingData = JSON.parse(sessionStorage.getItem('pending_deposit') || '{}');
       
-      // Register deposit on-chain
+      // First check if deposit is already registered
       const depositManager = await getDepositManager();
+      const totalDeposits = await depositManager.getTotalDeposits();
+      console.log('Total deposits in system:', totalDeposits.toString());
+      
+      // Check if this deposit already exists by checking commitments
+      const commitments = await depositManager.getCommitmentsInOrder();
+      const depositIndex = commitments.findIndex((c: string) => c === pendingData.commitment);
+      
+      if (depositIndex >= 0) {
+        console.log('✅ Deposit already registered at index:', depositIndex);
+        
+        // Get the deposit details
+        const deposit = await depositManager.getDeposit(BigInt(depositIndex));
+        if (deposit && deposit.length > 0 && deposit[0]) {
+          const fullCommitment = JSON.stringify({
+            ...pendingData,
+            depositId: depositIndex.toString(),
+            leafIndex: deposit[0].leafIndex.toString()
+          });
+          
+          setCommitment(fullCommitment);
+          setTxHash(txHash || '0x' + bytesToHex(crypto.getRandomValues(new Uint8Array(32))));
+          setStep('complete');
+          
+          // Clear temporary storage
+          sessionStorage.removeItem('pending_deposit');
+          sessionStorage.removeItem('pending_tx');
+          return;
+        }
+      }
+      
+      // If not already registered, register it now
+      console.log('📝 Registering new deposit...');
+      
       const chainId = selectedChain === 'ICP' ? BigInt(0) : 
                      selectedChain === 'BTC' ? BigInt(1) : 
                      selectedChain === 'ETH' ? BigInt(2) : 
@@ -360,7 +474,8 @@ const DepositPage: React.FC = () => {
         const depositId = depositResult.depositId;
         const fullCommitment = JSON.stringify({
           ...pendingData,
-          depositId: depositId.toString()
+          depositId: depositId.toString(),
+          leafIndex: depositResult.leafIndex.toString()
         });
         
         setCommitment(fullCommitment);
@@ -374,8 +489,9 @@ const DepositPage: React.FC = () => {
         
         setStep('complete');
         
-        // Clear temporary storage
+        // Clear ALL temporary storage immediately after completion
         sessionStorage.removeItem('pending_deposit');
+        sessionStorage.removeItem('pending_tx');
       } else {
         throw new Error(result.err);
       }

@@ -1,5 +1,4 @@
 export const idlFactory = ({ IDL }) => {
-  const Result_2 = IDL.Variant({ 'ok' : IDL.Vec(IDL.Nat), 'err' : IDL.Text });
   const TokenId = IDL.Text;
   const NullifierHash = IDL.Text;
   const MerkleRoot = IDL.Text;
@@ -12,20 +11,6 @@ export const idlFactory = ({ IDL }) => {
     ),
     'c' : IDL.Tuple(IDL.Text, IDL.Text),
     'publicSignals' : IDL.Vec(IDL.Text),
-  });
-  const PlonkProof = IDL.Record({
-    'lro': IDL.Vec(IDL.Tuple(IDL.Text, IDL.Text)),
-    'z': IDL.Tuple(IDL.Text, IDL.Text),
-    'h': IDL.Vec(IDL.Tuple(IDL.Text, IDL.Text)),
-    'batched_proof': IDL.Record({
-      'h': IDL.Tuple(IDL.Text, IDL.Text),
-      'claimed_values': IDL.Vec(IDL.Text),
-    }),
-    'zshifted_proof': IDL.Record({
-      'h': IDL.Tuple(IDL.Text, IDL.Text),
-      'claimed_value': IDL.Text,
-    }),
-    'bsb22_commitments': IDL.Vec(IDL.Tuple(IDL.Text, IDL.Text)),
   });
   const ChainId = IDL.Nat;
   const Amount = IDL.Nat;
@@ -40,29 +25,37 @@ export const idlFactory = ({ IDL }) => {
     'chainId' : ChainId,
     'amount' : Amount,
   });
+  const PlonkProof = IDL.Record({
+    'h' : IDL.Vec(IDL.Tuple(IDL.Text, IDL.Text)),
+    'z' : IDL.Tuple(IDL.Text, IDL.Text),
+    'lro' : IDL.Vec(IDL.Tuple(IDL.Text, IDL.Text)),
+    'zshifted_proof' : IDL.Record({
+      'h' : IDL.Tuple(IDL.Text, IDL.Text),
+      'claimed_value' : IDL.Text,
+    }),
+    'bsb22_commitments' : IDL.Vec(IDL.Tuple(IDL.Text, IDL.Text)),
+    'batched_proof' : IDL.Record({
+      'h' : IDL.Tuple(IDL.Text, IDL.Text),
+      'claimed_values' : IDL.Vec(IDL.Text),
+    }),
+  });
   const Result_1 = IDL.Variant({ 'ok' : IDL.Nat, 'err' : IDL.Text });
   const Result = IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text });
   return IDL.Service({
-    'batchProcessWithdrawals' : IDL.Func([IDL.Vec(IDL.Nat)], [Result_2], []),
     'getPendingWithdrawals' : IDL.Func([], [IDL.Vec(Withdrawal)], ['query']),
     'getProcessedWithdrawals' : IDL.Func([], [IDL.Vec(Withdrawal)], ['query']),
-    'getWithdrawal' : IDL.Func([IDL.Nat], [IDL.Opt(Withdrawal)], ['query']),
-    'getWithdrawalStats' : IDL.Func(
+    'getVerificationCost' : IDL.Func(
         [],
         [
           IDL.Record({
-            'total' : IDL.Nat,
-            'pending' : IDL.Nat,
-            'processed' : IDL.Nat,
+            'instructions' : IDL.Nat,
+            'cycles' : IDL.Nat,
+            'usdCost' : IDL.Float64,
           }),
         ],
         ['query'],
       ),
-    'getWithdrawalsByChain' : IDL.Func(
-        [ChainId],
-        [IDL.Vec(Withdrawal)],
-        ['query'],
-      ),
+    'getWithdrawal' : IDL.Func([IDL.Nat], [IDL.Opt(Withdrawal)], ['query']),
     'initiateWithdrawal' : IDL.Func(
         [
           NullifierHash,
@@ -78,6 +71,7 @@ export const idlFactory = ({ IDL }) => {
       ),
     'isNullifierUsed' : IDL.Func([NullifierHash], [IDL.Bool], ['query']),
     'processWithdrawal' : IDL.Func([IDL.Nat], [Result], []),
+    'setPlonkVerificationKey' : IDL.Func([IDL.Vec(IDL.Nat8)], [Result], []),
   });
 };
 export const init = ({ IDL }) => { return []; };

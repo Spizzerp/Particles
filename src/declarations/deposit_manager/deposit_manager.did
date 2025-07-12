@@ -27,7 +27,10 @@ type ChainId = nat;
 type Amount = nat;
 service : {
   deposit: (Amount, TokenId, ChainId, CommitmentHash) -> (Result_1);
+  getAllCommitments: () -> (vec text) query;
+  getCurrentMerkleRoot: () -> (opt MerkleRoot) query;
   getDeposit: (nat) -> (opt Deposit) query;
+  getLeafCount: () -> (nat) query;
   getMerkleRoot: (nat) -> (opt MerkleRoot) query;
   getTotalDeposits: () -> (nat) query;
   getUserDeposits: (principal) -> (vec Deposit) query;

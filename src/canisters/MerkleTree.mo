@@ -36,12 +36,21 @@ module {
             // Recompute root after adding
             currentRoot := computeRoot();
             
+            // Debug logging
+            Debug.print("Added commitment at index " # Nat.toText(index));
+            Debug.print("New root: " # currentRoot);
+            
             return index;
         };
         
         // Get the current Merkle root
         public func getRoot() : MerkleNode {
-            currentRoot
+            // Always recompute to ensure correctness
+            let computedRoot = computeRoot();
+            Debug.print("Getting root - stored: " # currentRoot # ", computed: " # computedRoot);
+            
+            // Return the computed root to ensure it's always correct
+            computedRoot
         };
         
         // Get all commitments (for proof generation)
@@ -117,16 +126,33 @@ module {
                 return EMPTY_LEAF;
             };
             
+            // Debug log
+            Debug.print("Computing root for " # Nat.toText(commitments.size()) # " commitments");
+            
             // Start with commitments as leaves
             var currentLevel = Buffer.Buffer<MerkleNode>(commitments.size());
             for (commitment in commitments.vals()) {
                 currentLevel.add(commitment);
             };
             
-            // Build tree level by level
-            var level = 0;
-            while (level < TREE_DEPTH and currentLevel.size() > 1) {
-                let nextLevel = Buffer.Buffer<MerkleNode>(currentLevel.size() / 2 + 1);
+            // Special case for single commitment - ensure we hash through all levels
+            if (commitments.size() == 1) {
+                Debug.print("Single commitment case - initial: " # currentLevel.get(0));
+                
+                var hash = currentLevel.get(0);
+                // Hash with empty siblings for all 20 levels
+                for (level in Iter.range(0, TREE_DEPTH - 1)) {
+                    hash := mimcHash(hash, EMPTY_LEAF);
+                    Debug.print("Level " # Nat.toText(level) # " hash: " # hash);
+                };
+                
+                Debug.print("Final root after 20 levels: " # hash);
+                return hash;
+            };
+            
+            // For multiple commitments, use the standard algorithm
+            for (level in Iter.range(0, TREE_DEPTH - 1)) {
+                let nextLevel = Buffer.Buffer<MerkleNode>((currentLevel.size() + 1) / 2);
                 
                 var i = 0;
                 while (i < currentLevel.size()) {
@@ -142,7 +168,16 @@ module {
                 };
                 
                 currentLevel := nextLevel;
-                level += 1;
+                
+                // If we're down to one element, continue hashing with empty
+                if (currentLevel.size() == 1) {
+                    var remainingHash = currentLevel.get(0);
+                    // Hash the remaining levels
+                    for (remainingLevel in Iter.range(level + 1, TREE_DEPTH - 1)) {
+                        remainingHash := mimcHash(remainingHash, EMPTY_LEAF);
+                    };
+                    return remainingHash;
+                };
             };
             
             currentLevel.get(0)
@@ -173,4 +208,4 @@ module {
             currentHash == root
         };
     };
-}
+} 

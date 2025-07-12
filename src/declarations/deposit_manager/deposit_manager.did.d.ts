@@ -24,7 +24,10 @@ export type Time = bigint;
 export type TokenId = string;
 export interface _SERVICE {
   'deposit' : ActorMethod<[Amount, TokenId, ChainId, CommitmentHash], Result_1>,
+  'getAllCommitments' : ActorMethod<[], Array<string>>,
+  'getCurrentMerkleRoot' : ActorMethod<[], [] | [MerkleRoot]>,
   'getDeposit' : ActorMethod<[bigint], [] | [Deposit]>,
+  'getLeafCount' : ActorMethod<[], bigint>,
   'getMerkleRoot' : ActorMethod<[bigint], [] | [MerkleRoot]>,
   'getTotalDeposits' : ActorMethod<[], bigint>,
   'getUserDeposits' : ActorMethod<[Principal], Array<Deposit>>,

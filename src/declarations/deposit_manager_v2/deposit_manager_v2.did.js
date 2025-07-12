@@ -8,7 +8,7 @@ export const idlFactory = ({ IDL }) => {
     'leafIndex' : IDL.Nat,
     'merkleRoot' : IDL.Text,
   });
-  const Result = IDL.Variant({ 'ok' : DepositResult, 'err' : IDL.Text });
+  const Result_1 = IDL.Variant({ 'ok' : DepositResult, 'err' : IDL.Text });
   const Time = IDL.Int;
   const Deposit = IDL.Record({
     'id' : IDL.Nat,
@@ -20,18 +20,21 @@ export const idlFactory = ({ IDL }) => {
     'amount' : Amount,
     'commitment' : CommitmentHash,
   });
-  const Result_1 = IDL.Variant({ 'ok' : IDL.Vec(IDL.Text), 'err' : IDL.Text });
+  const Result_2 = IDL.Variant({ 'ok' : IDL.Vec(IDL.Text), 'err' : IDL.Text });
+  const Result = IDL.Variant({ 'ok' : IDL.Text, 'err' : IDL.Text });
   return IDL.Service({
+    'acceptCycles' : IDL.Func([], [IDL.Nat], []),
     'deposit' : IDL.Func(
         [Amount, TokenId, ChainId, CommitmentHash],
-        [Result],
+        [Result_1],
         [],
       ),
     'getAllDeposits' : IDL.Func([], [IDL.Vec(Deposit)], ['query']),
     'getCommitmentsInOrder' : IDL.Func([], [IDL.Vec(IDL.Text)], ['query']),
     'getCurrentMerkleRoot' : IDL.Func([], [IDL.Text], ['query']),
+    'getCycleBalance' : IDL.Func([], [IDL.Nat], ['query']),
     'getDeposit' : IDL.Func([IDL.Nat], [IDL.Opt(Deposit)], ['query']),
-    'getMerkleProof' : IDL.Func([IDL.Nat], [Result_1], ['query']),
+    'getMerkleProof' : IDL.Func([IDL.Nat], [Result_2], ['query']),
     'getTotalDeposits' : IDL.Func([], [IDL.Nat], ['query']),
     'getUserDeposits' : IDL.Func(
         [IDL.Principal],
@@ -40,9 +43,10 @@ export const idlFactory = ({ IDL }) => {
       ),
     'migrateDeposit' : IDL.Func(
         [IDL.Nat, IDL.Principal, IDL.Nat, IDL.Text, IDL.Nat, IDL.Text, IDL.Int],
-        [Result],
+        [Result_1],
         [],
       ),
+    'resetMerkleTree' : IDL.Func([], [Result], []),
     'verifyMerkleProof' : IDL.Func(
         [IDL.Text, IDL.Nat, IDL.Vec(IDL.Text), IDL.Text],
         [IDL.Bool],

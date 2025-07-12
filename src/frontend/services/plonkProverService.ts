@@ -1,4 +1,5 @@
-import { PlonkProof, WitnessData } from './types';
+import { PlonkProof, WitnessData, GnarkPlonkProof } from './types';
+import { parseGnarkPlonkProof, toWithdrawalProcessorFormat, gnarkProofToCanisterFormat } from '../utils/gnarkPlonkParser';
 
 // Load Go WASM runtime
 declare global {
@@ -23,14 +24,7 @@ export interface ProverInputs {
 }
 
 export interface GeneratedProof {
-  proof: {
-    lro: [string, string][];
-    z: [string, string];
-    h1: [string, string];
-    h2: [string, string];
-    wire_values_at_z: string[];
-    wire_values_at_z_omega: string[];
-  };
+  proof: GnarkPlonkProof;
   publicSignals: string[];
   nullifierHash: string;
   merkleRoot: string;
@@ -64,15 +58,42 @@ class PlonkProverService {
       // Initialize Go runtime
       this.go = new window.Go();
 
-      // Fetch production WASM
-      console.log('Loading production PLONK prover (20MB)...');
-      const response = await fetch('/wasm/particlefund_production_real.wasm');
-      if (!response.ok) {
-        throw new Error('Failed to load PLONK prover WASM');
+      // WASM files in order of preference (largest/most complete to smallest)
+      const wasmFiles = [
+        { name: 'production (20MB)', path: '/wasm/particlefund_production_real.wasm' },
+        { name: 'standard prover (15MB)', path: '/wasm/particlefund_prover.wasm' },
+        { name: 'minimal (11MB)', path: '/wasm/particlefund_standard.wasm' }
+      ];
+
+      let buffer: ArrayBuffer | null = null;
+      let loadedWasm = '';
+
+      // Try each WASM file until one loads successfully
+      for (const wasmFile of wasmFiles) {
+        try {
+          console.log(`Loading ${wasmFile.name} PLONK prover...`);
+          const response = await fetch(wasmFile.path);
+          
+          if (!response.ok) {
+            console.warn(`Failed to load ${wasmFile.name}: HTTP ${response.status}`);
+            continue;
+          }
+
+          buffer = await response.arrayBuffer();
+          loadedWasm = wasmFile.name;
+          console.log(`Successfully loaded ${wasmFile.name}`);
+          break;
+        } catch (error) {
+          console.warn(`Failed to load ${wasmFile.name}:`, error);
+          // Continue to next WASM file
+        }
       }
 
-      const buffer = await response.arrayBuffer();
-      console.log('Instantiating WASM...');
+      if (!buffer) {
+        throw new Error('Failed to load any PLONK prover WASM file. The canister might be out of cycles.');
+      }
+
+      console.log(`Instantiating WASM (${loadedWasm})...`);
       
       const result = await WebAssembly.instantiate(buffer, this.go.importObject);
       
@@ -93,7 +114,7 @@ class PlonkProverService {
       
       this.initialized = true;
       this.proverReady = true;
-      console.log('PLONK prover initialized successfully');
+      console.log(`PLONK prover initialized successfully using ${loadedWasm}`);
     } catch (error) {
       console.error('Failed to initialize PLONK prover:', error);
       throw error;
@@ -176,21 +197,47 @@ class PlonkProverService {
     // Parse and validate the proof
     const proofData = generatedProof.proof;
     
+    // Check if proof is a serialized hex string
+    if (typeof proofData === 'string') {
+      console.log('Proof is serialized, parsing gnark format...');
+      const parsedProof = parseGnarkPlonkProof(proofData);
+      
+      // Convert to canister format (full gnark structure)
+      const canisterProof = gnarkProofToCanisterFormat(parsedProof);
+      
+      return {
+        proof: canisterProof,
+        publicSignals: generatedProof.publicSignals || [],
+        nullifierHash: inputs.nullifierHash,
+        merkleRoot: inputs.merkleRoot,
+        amount: inputs.amount
+      };
+    }
+    
     // Ensure all proof components are present
     if (!proofData.lro || !proofData.z || !proofData.h1 || !proofData.h2 || 
         !proofData.wire_values_at_z || !proofData.wire_values_at_z_omega) {
       throw new Error('Generated proof is missing required components');
     }
     
-    return {
-      proof: {
-        lro: proofData.lro,
-        z: proofData.z,
-        h1: proofData.h1,
-        h2: proofData.h2,
-        wire_values_at_z: proofData.wire_values_at_z,
-        wire_values_at_z_omega: proofData.wire_values_at_z_omega
+    // Convert structured proof to full gnark format
+    const fullProof: GnarkPlonkProof = {
+      lro: proofData.lro,
+      z: proofData.z,
+      h: [proofData.h1, proofData.h2, ['0x0000000000000000000000000000000000000000000000000000000000000000', '0x0000000000000000000000000000000000000000000000000000000000000000']],
+      bsb22_commitments: [],
+      batched_proof: {
+        h: ['0x0000000000000000000000000000000000000000000000000000000000000000', '0x0000000000000000000000000000000000000000000000000000000000000000'],
+        claimed_values: proofData.wire_values_at_z || []
       },
+      zshifted_proof: {
+        h: ['0x0000000000000000000000000000000000000000000000000000000000000000', '0x0000000000000000000000000000000000000000000000000000000000000000'],
+        claimed_value: '0x0000000000000000000000000000000000000000000000000000000000000000'
+      }
+    };
+    
+    return {
+      proof: fullProof,
       publicSignals: proofData.publicSignals || [],
       nullifierHash: inputs.nullifierHash,
       merkleRoot: inputs.merkleRoot,

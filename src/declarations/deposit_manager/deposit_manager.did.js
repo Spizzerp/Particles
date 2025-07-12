@@ -4,6 +4,7 @@ export const idlFactory = ({ IDL }) => {
   const ChainId = IDL.Nat;
   const CommitmentHash = IDL.Text;
   const Result_1 = IDL.Variant({ 'ok' : IDL.Nat, 'err' : IDL.Text });
+  const MerkleRoot = IDL.Text;
   const Time = IDL.Int;
   const Deposit = IDL.Record({
     'id' : IDL.Nat,
@@ -15,7 +16,6 @@ export const idlFactory = ({ IDL }) => {
     'amount' : Amount,
     'commitment' : CommitmentHash,
   });
-  const MerkleRoot = IDL.Text;
   const Result = IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text });
   return IDL.Service({
     'deposit' : IDL.Func(
@@ -23,7 +23,10 @@ export const idlFactory = ({ IDL }) => {
         [Result_1],
         [],
       ),
+    'getAllCommitments' : IDL.Func([], [IDL.Vec(IDL.Text)], ['query']),
+    'getCurrentMerkleRoot' : IDL.Func([], [IDL.Opt(MerkleRoot)], ['query']),
     'getDeposit' : IDL.Func([IDL.Nat], [IDL.Opt(Deposit)], ['query']),
+    'getLeafCount' : IDL.Func([], [IDL.Nat], ['query']),
     'getMerkleRoot' : IDL.Func([IDL.Nat], [IDL.Opt(MerkleRoot)], ['query']),
     'getTotalDeposits' : IDL.Func([], [IDL.Nat], ['query']),
     'getUserDeposits' : IDL.Func(

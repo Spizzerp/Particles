@@ -1,5 +1,15 @@
 [
   {
+    "match": "**/*.wasm",
+    "headers": {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Content-Type": "application/wasm"
+    },
+    "allow_raw_access": true
+  },
+  {
     "match": "**/*",
     "headers": {
       "Access-Control-Allow-Origin": "*",
