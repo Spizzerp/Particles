@@ -27,6 +27,8 @@ export interface DepositData {
   amountWei?: string; // Amount in smallest unit (wei) used for commitment
   token: string;
   chain: string;
+  leafIndex?: string; // Leaf index in the merkle tree
+  address?: string;   // Deposit address used
 }
 
 /**
@@ -90,8 +92,12 @@ export async function generateWithdrawalProof(
   // Generate nullifier hash from nullifier
   const nullifierHash = depositData.nullifier; // Already a hash from deposit
   
-  // Use leaf index from deposit ID if not provided
-  const index = leafIndex !== undefined ? leafIndex : parseInt(depositData.depositId, 10);
+  // Use leaf index from deposit data first, then from parameter, then from deposit ID
+  const index = depositData.leafIndex !== undefined 
+    ? parseInt(depositData.leafIndex, 10)
+    : leafIndex !== undefined 
+    ? leafIndex 
+    : parseInt(depositData.depositId, 10);
   
   // Check if nullifierHash is missing (old deposits) and compute it
   if (!depositData.nullifierHash) {
@@ -123,7 +129,7 @@ export async function generateWithdrawalProof(
     merkleProof,
     recipient,
     amount: depositData.amount,
-    chainId: '1', // Default to Ethereum mainnet
+    chainId: '11155111', // Default to Sepolia testnet
     proof: generatedProof.proof,
     publicSignals: generatedProof.publicSignals
   };

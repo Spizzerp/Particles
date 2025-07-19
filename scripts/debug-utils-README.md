@@ -20,7 +20,7 @@ Analyze unsigned transaction parameters and understand what needs to be signed:
 
 ```bash
 node scripts/debug-utils.js tx-analyze \
-  --to 0x8626502727D7faf282C44df18B34E50D0DB45Eae \
+  --to 0xd72114Ae0a3E80B921Ca26aB522F9Fa656a6c2e1 \
   --value 0.001 \
   --nonce 0 \
   --gas-price 1 \
@@ -85,7 +85,7 @@ Debug failed deposit transactions with comprehensive network analysis:
 ```bash
 node scripts/debug-utils.js deposit-debug \
   --address 0x48f3cecedb8b4c6518bf78c201acddf31067d2d4 \
-  --pool 0x8626502727D7faf282C44df18B34E50D0DB45Eae \
+  --pool 0xd72114Ae0a3E80B921Ca26aB522F9Fa656a6c2e1 \
   --network sepolia \
   --value 0.01
 ```

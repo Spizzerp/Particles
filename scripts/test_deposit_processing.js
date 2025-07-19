@@ -4,7 +4,7 @@ async function checkDepositStatus() {
     const provider = new ethers.JsonRpcProvider('https://ethereum-sepolia.publicnode.com');
     
     const depositAddress = '0x48f3cecedb8b4c6518bf78c201acddf31067d2d4';
-    const poolContract = '0x8626502727D7faf282C44df18B34E50D0DB45Eae';
+    const poolContract = '0xd72114Ae0a3E80B921Ca26aB522F9Fa656a6c2e1';
     
     console.log('Checking deposit status...\n');
     

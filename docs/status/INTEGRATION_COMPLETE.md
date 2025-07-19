@@ -61,9 +61,11 @@ User Receives ETH
 ## How It Works
 
 ### Making a Deposit
-1. User sends ETH to contract: `0x9b0721C174b103facEC1EeE435679Ae9C493163C`
+1. User sends ETH to Sepolia contract: `0xd72114Ae0a3E80B921Ca26aB522F9Fa656a6c2e1`
 2. Include commitment in transaction data
 3. Run `checkDeposits()` to detect and add to Merkle tree
+
+**Note**: Mainnet deposits currently locked - see `/MAINNET_CONTRACT_INFO.md`
 
 ### Making a Withdrawal
 1. Generate PLONK proof client-side with:

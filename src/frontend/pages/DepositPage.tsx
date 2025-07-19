@@ -63,6 +63,66 @@ const DepositPage: React.FC = () => {
     }
   }, [step, timeLeft]);
 
+  // Recovery mechanism for page refreshes
+  useEffect(() => {
+    const recoverPendingDeposit = async () => {
+      const pendingTx = sessionStorage.getItem('pending_tx');
+      const pendingDepositStr = sessionStorage.getItem('pending_deposit');
+      
+      if (pendingTx && pendingDepositStr) {
+        console.log('🔄 Found pending deposit, attempting recovery...');
+        
+        try {
+          const pendingDeposit = JSON.parse(pendingDepositStr);
+          const ethereumAdapter = await getEthereumAdapter();
+          
+          // Check transaction status
+          const txStatusResult = await ethereumAdapter.checkTransactionStatus(pendingTx);
+          console.log('📊 Recovered transaction status:', txStatusResult);
+          
+          if ('ok' in txStatusResult && txStatusResult.ok.status === 'confirmed') {
+            // Complete the deposit
+            const completeResult = await ethereumAdapter.completeDeposit(
+              pendingDeposit.address,
+              pendingTx
+            );
+            console.log('📝 Recovery completion result:', completeResult);
+            
+            // Try to get deposit details from deposit manager
+            const depositManager = await getDepositManager();
+            const allDeposits = await depositManager.getAllDeposits();
+            const found = allDeposits.find(d => d.commitment === pendingDeposit.commitment);
+            
+            if (found) {
+              const fullCommitment = JSON.stringify({
+                ...pendingDeposit,
+                depositId: found.id.toString(),
+                leafIndex: found.leafIndex.toString()
+              });
+              
+              setCommitment(fullCommitment);
+              setTxHash(pendingTx);
+              setStep('complete');
+              
+              // Clear storage after successful recovery
+              sessionStorage.removeItem('pending_tx');
+              sessionStorage.removeItem('pending_deposit');
+              
+              console.log('✅ Deposit recovered successfully!');
+            }
+          } else if ('ok' in txStatusResult && txStatusResult.ok.status === 'pending') {
+            console.log('⏳ Transaction still pending, will continue monitoring...');
+            // Could restart monitoring here if needed
+          }
+        } catch (error) {
+          console.error('Failed to recover pending deposit:', error);
+        }
+      }
+    };
+    
+    recoverPendingDeposit();
+  }, []);
+
   // Generate unique deposit address when moving to address step
   const generateDepositAddress = async () => {
     try {
@@ -295,34 +355,72 @@ const DepositPage: React.FC = () => {
               // Save the pending transaction hash
               sessionStorage.setItem('pending_tx', txHash);
               
-              // Wait longer and check transaction status directly
-              const checkTxStatus = async () => {
-                try {
-                  // Check if deposit was marked as processed
-                  const updatedInfo = await ethereumAdapter.getDepositInfo(depositAddress);
-                  if (updatedInfo && updatedInfo.length > 0 && updatedInfo[0].processed) {
-                    console.log('✅ Deposit confirmed and processed!');
-                    await registerDeposit(txHash);
-                    return;
+              // Monitor transaction with progressive delays
+              const monitorTransaction = async () => {
+                let retries = 0;
+                const maxRetries = 30;
+                
+                while (retries < maxRetries) {
+                  try {
+                    // Check transaction status
+                    const txStatusResult = await ethereumAdapter.checkTransactionStatus(txHash);
+                    console.log(`📊 Transaction status (attempt ${retries + 1}):`, txStatusResult);
+                    
+                    // Unwrap the Result type
+                    if ('ok' in txStatusResult) {
+                      const txStatus = txStatusResult.ok;
+                      
+                      if (txStatus.status === 'confirmed') {
+                        console.log('✅ Transaction confirmed on-chain!');
+                        
+                        // Complete the deposit
+                        const completeResult = await ethereumAdapter.completeDeposit(depositAddress, txHash);
+                        console.log('📝 Deposit completion result:', completeResult);
+                        
+                        // Register with deposit manager
+                        await registerDeposit(txHash);
+                        return;
+                      } else if (txStatus.status === 'failed') {
+                        throw new Error('Transaction failed on-chain');
+                      }
+                    } else {
+                      // Handle error case
+                      console.error('Error checking transaction status:', txStatusResult.err);
+                      throw new Error(`Failed to check transaction status: ${txStatusResult.err}`);
+                    }
+                    
+                    // Progressive delay: starts at 5s, increases up to 60s
+                    const delay = Math.min(5000 * Math.pow(1.5, retries), 60000);
+                    console.log(`⏳ Waiting ${delay/1000}s before next check...`);
+                    
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    retries++;
+                  } catch (error) {
+                    console.error('Error monitoring transaction:', error);
+                    retries++;
+                    
+                    // On error, wait before retrying
+                    if (retries < maxRetries) {
+                      await new Promise(resolve => setTimeout(resolve, 10000));
+                    }
                   }
-                  
-                  // Otherwise wait and check again
-                  attempts++;
-                  if (attempts < maxAttempts) {
-                    setTimeout(checkTxStatus, 20000); // Wait 20 seconds
-                  } else {
-                    console.log('⚠️ Transaction confirmation timeout. The transaction may still be processing.');
-                    console.log('Transaction hash:', txHash);
-                    alert('Transaction submitted but confirmation is taking longer than expected. Transaction hash: ' + txHash);
-                    setStep('address');
-                  }
-                } catch (error) {
-                  console.error('Error checking transaction status:', error);
                 }
+                
+                console.log('⚠️ Transaction monitoring timeout.');
+                console.log('Transaction hash:', txHash);
+                alert('Transaction monitoring timeout. Your transaction may still be processing. Transaction hash: ' + txHash);
+                
+                // Save state for recovery
+                const currentPendingData = JSON.parse(sessionStorage.getItem('pending_deposit') || '{}');
+                sessionStorage.setItem('pending_tx', txHash);
+                sessionStorage.setItem('pending_deposit', JSON.stringify({
+                  ...currentPendingData,
+                  address: depositAddress
+                }));
               };
               
-              // Start checking transaction status
-              setTimeout(checkTxStatus, 20000);
+              // Start monitoring
+              monitorTransaction();
               return;
             } else {
               // Deposit was confirmed!
@@ -351,24 +449,53 @@ const DepositPage: React.FC = () => {
                   return;
                 }
               }
-            } else if (processResult.err.includes('Insufficient balance') && sessionStorage.getItem('pending_tx')) {
+            } else if (processResult.err.includes('Insufficient balance')) {
               // This likely means the transaction already went through
-              console.log('💡 Insufficient balance detected - transaction may have already been sent');
-              const pendingTx = sessionStorage.getItem('pending_tx');
+              console.log('💡 Insufficient balance detected - checking if transaction was already sent');
               
-              // Check if deposit was marked as processed
-              const depositInfo = await ethereumAdapter.getDepositInfo(depositAddress);
-              if (depositInfo && depositInfo.length > 0 && depositInfo[0].processed) {
-                console.log('✅ Deposit was already processed!');
-                // Use the stored tx hash or a default one
-                const txToUse = pendingTx || sessionStorage.getItem('pending_tx') || '0x80d84c574fab12f4c0c5a6ec438b6c4567a4220df54978c956fc246062e976a5';
-                await registerDeposit(txToUse);
-                return;
-              } else {
-                console.log('⏳ Transaction may still be pending. TX:', pendingTx);
-                // Stop trying to process and just wait
+              // Check for pending transaction
+              const pendingTx = sessionStorage.getItem('pending_tx');
+              if (pendingTx) {
+                // Check transaction status
+                const txStatusResult = await ethereumAdapter.checkTransactionStatus(pendingTx);
+                console.log('📊 Transaction status:', txStatusResult);
+                
+                if ('ok' in txStatusResult && txStatusResult.ok.status === 'confirmed') {
+                  // Complete the deposit
+                  const completeResult = await ethereumAdapter.completeDeposit(depositAddress, pendingTx);
+                  console.log('📝 Completion result:', completeResult);
+                  await registerDeposit(pendingTx);
+                  return;
+                }
+              }
+              
+              // Also check if deposit exists in the system
+              const depositManager = await getDepositManager();
+              const allDeposits = await depositManager.getAllDeposits();
+              const pendingData = JSON.parse(sessionStorage.getItem('pending_deposit') || '{}');
+              const found = allDeposits.find(d => d.commitment === pendingData.commitment);
+              
+              if (found) {
+                console.log('✅ Deposit found in system with leaf index:', found.leafIndex);
+                // Create complete deposit note
+                const fullCommitment = JSON.stringify({
+                  ...pendingData,
+                  depositId: found.id.toString(),
+                  leafIndex: found.leafIndex.toString()
+                });
+                
+                setCommitment(fullCommitment);
+                setTxHash(pendingTx || '0x0000000000000000000000000000000000000000000000000000000000000000');
+                setStep('complete');
+                
+                // Clear storage
+                sessionStorage.removeItem('pending_tx');
+                sessionStorage.removeItem('pending_deposit');
                 return;
               }
+              
+              console.log('⏳ Transaction may still be pending');
+              return;
             }
           }
           
@@ -646,12 +773,13 @@ const DepositPage: React.FC = () => {
               </div>
 
               <p className="warning-text">
-                ⚠️ Only send {selectedToken} on {selectedChain === 'ETH' ? 'Ethereum Mainnet' : chains.find(c => c.id === selectedChain)?.name} network
+                ⚠️ Only send {selectedToken} on {selectedChain === 'ETH' ? 'Sepolia Testnet' : chains.find(c => c.id === selectedChain)?.name} network
               </p>
               
               {selectedChain === 'ETH' && (
                 <div className="network-info">
-                  <p className="mainnet-warning">⚠️ This is a MAINNET address. Real ETH will be used!</p>
+                  <p className="testnet-info">🧪 Currently using Sepolia Testnet for development</p>
+                  <p className="testnet-note">Please use Sepolia testnet ETH for deposits</p>
                 </div>
               )}
             </div>

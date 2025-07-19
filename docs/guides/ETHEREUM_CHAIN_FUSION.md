@@ -334,9 +334,9 @@ describe('Ethereum Integration', () => {
    - Commitment-based deposits with event emission
    - Admin withdrawal function for ICP integration
    - **🎉 DEPLOYED TO SEPOLIA TESTNET!**
-     - **Contract Address**: `0x9b0721C174b103facEC1EeE435679Ae9C493163C`
-     - **Deployment TX**: `0x03f1eab8c3d373ef4a81883fe333beda44e96a46f865677017d635f90cabd226`
-     - **[View on Etherscan](https://sepolia.etherscan.io/address/0x9b0721C174b103facEC1EeE435679Ae9C493163C)**
+     - **Current Contract**: `0xd72114Ae0a3E80B921Ca26aB522F9Fa656a6c2e1` (July 14, 2025)
+     - **[View on Etherscan](https://sepolia.etherscan.io/address/0xd72114Ae0a3E80B921Ca26aB522F9Fa656a6c2e1)**
+     - **Mainnet Contract**: See `/MAINNET_CONTRACT_INFO.md` for locked funds
 
 2. **Ethereum Adapter Canister**
    - `EthereumAdapter.mo` fully implemented

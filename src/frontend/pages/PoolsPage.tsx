@@ -17,8 +17,8 @@ const PoolsPage: React.FC = () => {
   const mockPools: Pool[] = [
     {
       id: '1',
-      chainId: '1',
-      chainName: 'Ethereum',
+      chainId: '11155111',
+      chainName: 'Sepolia',
       token: 'ETH',
       liquidity: '$0',
       apy: '0%',

@@ -172,6 +172,15 @@ export const getEthereumAdapterActor = async (identity?: Identity): Promise<Acto
       })], []),
       getCycleBalance: IDL.Func([], [IDL.Nat], ['query']),
       acceptCycles: IDL.Func([], [IDL.Nat], []),
+      checkTransactionStatus: IDL.Func([IDL.Text], [IDL.Variant({ 
+        ok: IDL.Record({
+          status: IDL.Text,
+          blockNumber: IDL.Opt(IDL.Nat),
+          gasUsed: IDL.Opt(IDL.Nat),
+        }), 
+        err: IDL.Text 
+      })], []),
+      completeDeposit: IDL.Func([IDL.Text, IDL.Text], [IDL.Variant({ ok: IDL.Text, err: IDL.Text })], []),
     });
   };
 

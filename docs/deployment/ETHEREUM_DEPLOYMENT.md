@@ -3,12 +3,17 @@
 ## 🎉 Deployment Status
 
 ### Sepolia Testnet Deployment (Active)
-- **Contract Address**: `0x8626502727D7faf282C44df18B34E50D0DB45Eae` (Updated with 0.01 ETH support)
-- **Deployment TX**: `0xa97a20659d98abac9b4ce8a2a364c79e8b17f79ecaf59267def00627d775456e`
-- **Previous Contract**: `0x9b0721C174b103facEC1EeE435679Ae9C493163C`
-- **Network**: Sepolia Testnet
+- **Contract Address**: `0xd72114Ae0a3E80B921Ca26aB522F9Fa656a6c2e1` (Current deployment)
+- **Deployment TX**: `0x72c6045586051b7c6dde3a54a70a8e207252641d43ee5fec94fbc5c95c9142c9`
+- **Deployed**: July 14, 2025
+- **Deployer**: `0x92Ab98722Fe2651FABf40683e8E690e7802aEb2e`
+- **Network**: Sepolia Testnet (Chain ID: 11155111)
 - **Status**: ✅ Live and connected to ICP
-- **[View on Etherscan](https://sepolia.etherscan.io/address/0x9b0721C174b103facEC1EeE435679Ae9C493163C)**
+- **[View on Etherscan](https://sepolia.etherscan.io/address/0xd72114Ae0a3E80B921Ca26aB522F9Fa656a6c2e1)**
+
+### Mainnet Contract (Contains Locked Funds)
+- **See**: `/MAINNET_CONTRACT_INFO.md` for mainnet recovery details
+- **Status**: ⚠️ Funds locked - recovery pending
 
 ### ICP Integration Status
 - **Ethereum Adapter Canister**: `ajuq4-ruaaa-aaaaa-qaaga-cai` (local)

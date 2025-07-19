@@ -1,0 +1,44 @@
+[
+  {
+    "match": "**/*",
+    "security_policy": "standard",
+    "headers": {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Cache-Control": "public, max-age=31536000"
+    }
+  },
+  {
+    "match": "*.wasm",
+    "content_type": "application/wasm",
+    "headers": {
+      "Content-Type": "application/wasm",
+      "Cache-Control": "public, max-age=31536000, immutable"
+    }
+  },
+  {
+    "match": "*.js",
+    "content_type": "application/javascript",
+    "headers": {
+      "Content-Type": "application/javascript",
+      "Cache-Control": "public, max-age=31536000, immutable"
+    }
+  },
+  {
+    "match": "*.html",
+    "content_type": "text/html",
+    "headers": {
+      "Content-Type": "text/html",
+      "Cache-Control": "no-cache, no-store, must-revalidate"
+    }
+  },
+  {
+    "match": "index.html",
+    "content_type": "text/html",
+    "headers": {
+      "Content-Type": "text/html",
+      "Cache-Control": "no-cache, no-store, must-revalidate"
+    }
+  }
+]

@@ -71,7 +71,7 @@ export function generateDeterministicAddress(
   const hash = sha256(addressData);
   
   // For Ethereum-like addresses, take first 20 bytes
-  if (chainId === 1) { // Ethereum
+  if (chainId === 11155111) { // Sepolia testnet
     return '0x' + bytesToHex(hash.slice(0, 20));
   }
   
@@ -171,7 +171,7 @@ export async function estimateFees(
   if (amount.includes('.')) {
     // Determine decimals based on chainId
     const decimals = chainId === 0 ? 8 :  // Bitcoin
-                    chainId === 1 ? 18 : // Ethereum
+                    chainId === 11155111 ? 18 : // Sepolia testnet
                     8; // ICP default
     amountBigInt = BigInt(Math.floor(parseFloat(amount) * Math.pow(10, decimals)));
   } else {
@@ -195,7 +195,7 @@ export async function estimateFees(
 export function formatAmount(amount: string, chainId: number): string {
   const decimals: Record<number, number> = {
     0: 8,  // Bitcoin
-    1: 18, // Ethereum
+    11155111: 18, // Sepolia testnet
     2: 8,  // ICP
   };
   
@@ -231,7 +231,7 @@ export function formatAmount(amount: string, chainId: number): string {
 export function parseAmount(input: string, chainId: number): string {
   const decimals: Record<number, number> = {
     0: 8,  // Bitcoin
-    1: 18, // Ethereum
+    11155111: 18, // Sepolia testnet
     2: 8,  // ICP
   };
   

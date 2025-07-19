@@ -299,7 +299,7 @@ actor EthereumAdapter {
     };
     
     // State
-    private stable var depositContractAddress : Text = "0x9b0721C174b103facEC1EeE435679Ae9C493163C"; // Mainnet pool contract
+    private stable var depositContractAddress : Text = "0xd72114Ae0a3E80B921Ca26aB522F9Fa656a6c2e1"; // Sepolia testnet pool contract (July 14, 2025 deployment)
     private stable var lastCheckedBlock : Nat = 0;
     private stable var nonce : Nat = 0;
     
@@ -316,7 +316,7 @@ actor EthereumAdapter {
     private let DEPOSIT_EVENT_SIGNATURE = "0x90890809c654f11d6e72a28fa60149770a0d11ec6c92319d6ceb2bb0a4ea1a15";
     
     // Keccak256 canister ID - will be updated after deployment
-    private var keccak256CanisterId : Text = "hjxjp-uyaaa-aaaaj-a2dha-cai"; // Mainnet keccak256 canister
+    private var keccak256CanisterId : Text = "hjxjp-uyaaa-aaaaj-a2dha-cai"; // ICP Mainnet keccak256 canister (works for all Ethereum networks)
     
     // RPC Configuration - Using public endpoints only
     // Private endpoints with API keys should be configured through environment variables
@@ -482,7 +482,7 @@ actor EthereumAdapter {
                     // Add cycles for EVM RPC call
                     ExperimentalCycles.add(2_000_000_000); // 2B cycles
                     let balanceResult = await evmRpc.request(
-                        #EthMainnet(#PublicNode),
+                        #EthSepolia(#PublicNode),
                         balanceRequest,
                         2048
                     );
@@ -545,7 +545,7 @@ actor EthereumAdapter {
             // Add cycles for EVM RPC call
             ExperimentalCycles.add(2_000_000_000); // 2B cycles
             let nonceResult = await evmRpc.eth_getTransactionCount(
-                #EthMainnet(?[#PublicNode]),
+                #EthSepolia(?[#PublicNode]),
                 ?{
                     responseSizeEstimate = ?64;
                     responseConsensus = null;
@@ -589,7 +589,7 @@ actor EthereumAdapter {
             // Add cycles for EVM RPC call
             ExperimentalCycles.add(2_000_000_000); // 2B cycles
             let balanceResult = await evmRpc.request(
-                #EthMainnet(#PublicNode),
+                #EthSepolia(#PublicNode),
                 balanceRequest,
                 2048
             );
@@ -655,7 +655,7 @@ actor EthereumAdapter {
                 nonce = addressNonce;
                 gasPrice = gasPrice;
                 gasLimit = gasLimit;
-                chainId = 1; // Ethereum mainnet
+                chainId = 11155111; // Sepolia testnet // Ethereum mainnet
             };
             
             Debug.print("Transaction details: to=" # depositContractAddress # 
@@ -685,7 +685,7 @@ actor EthereumAdapter {
             // Add cycles for EVM RPC call (Rust example uses 10B)
             ExperimentalCycles.add(10_000_000_000); // 10B cycles
             let submitResult = await evmRpc.eth_sendRawTransaction(
-                #EthMainnet(?[#PublicNode]),
+                #EthSepolia(?[#PublicNode]),
                 ?{
                     responseSizeEstimate = ?256;
                     responseConsensus = null;
@@ -703,7 +703,7 @@ actor EthereumAdapter {
                             let depositResult = await depositManager.deposit(
                                 amountToForward,  // Use actual forwarded amount, not original
                                 "ETH",
-                                1, // Mainnet chain ID
+                                11155111, // Sepolia testnet
                                 info.commitment
                             );
                             switch (depositResult) {
@@ -734,7 +734,7 @@ actor EthereumAdapter {
                             // Add cycles for second attempt
                             ExperimentalCycles.add(10_000_000_000); // 10B cycles
                             let submitResultV1 = await evmRpc.eth_sendRawTransaction(
-                                #EthMainnet(?[#PublicNode]),
+                                #EthSepolia(?[#PublicNode]),
                                 ?{
                                     responseSizeEstimate = ?256;
                                     responseConsensus = null;
@@ -750,7 +750,7 @@ actor EthereumAdapter {
                                     let depositResult = await depositManager.deposit(
                                         amountToForward,  // Use actual forwarded amount, not original
                                         "ETH",
-                                        1, // Mainnet chain ID
+                                        11155111, // Sepolia testnet chain ID
                                         info.commitment
                                     );
                                     switch (depositResult) {
@@ -901,7 +901,7 @@ actor EthereumAdapter {
                             let depositResult = await depositManager.deposit(
                                 event.amount,
                                 "ETH",
-                                1, // Mainnet chain ID
+                                11155111, // Sepolia testnet
                                 event.commitment
                             );
                             switch (depositResult) {
@@ -962,10 +962,10 @@ actor EthereumAdapter {
         Buffer.toArray(pending)
     };
 
-    // Process a single deposit address (now uses EIP-1559)
+    // Process a single deposit address (now uses V2 clean implementation)
     public shared(msg) func processSingleDeposit(address: Text) : async Result.Result<Text, Text> {
-        // Redirect to EIP-1559 version
-        await processSingleDepositEIP1559(address)
+        // Redirect to V2 clean implementation (best gas handling)
+        await processSingleDepositV2(address)
     };
 
     // Make RPC call via HTTP outcall with automatic fallback
@@ -1460,7 +1460,7 @@ actor EthereumAdapter {
                                 
                                 ExperimentalCycles.add(2_000_000_000);
                                 let balanceResult = await evmRpc.request(
-                                    #EthMainnet(#PublicNode),
+                                    #EthSepolia(#PublicNode),
                                     balanceRequest,
                                     2048
                                 );
@@ -1482,7 +1482,7 @@ actor EthereumAdapter {
                                 // Get nonce
                                 ExperimentalCycles.add(2_000_000_000);
                                 let nonceResult = await evmRpc.eth_getTransactionCount(
-                                    #EthMainnet(?[#PublicNode]),
+                                    #EthSepolia(?[#PublicNode]),
                                     ?{ responseSizeEstimate = ?64; responseConsensus = null; },
                                     { address = depositAddress; block = #Latest; }
                                 );
@@ -1524,7 +1524,7 @@ actor EthereumAdapter {
                                     maxFeePerGas = maxFeePerGas;
                                     maxPriorityFeePerGas = gasPrices.maxPriorityFee;
                                     gasLimit = gasLimit;
-                                    chainId = 1;
+                                    chainId = 11155111; // Sepolia testnet
                                 };
                                 
                                 // Sign and submit with the FOUND derivation path
@@ -1672,7 +1672,7 @@ actor EthereumAdapter {
         try {
             ExperimentalCycles.add(2_000_000_000); // 2B cycles
             let nonceResult = await evmRpc.eth_getTransactionCount(
-                #EthMainnet(?[#PublicNode]),
+                #EthSepolia(?[#PublicNode]),
                 ?{
                     responseSizeEstimate = ?64;
                     responseConsensus = null;
@@ -1697,99 +1697,11 @@ actor EthereumAdapter {
         }
     };
     
-    // Test forwarding with Rust canister using EIP-1559
-    public func testRustForwardingEIP1559(depositAddress: Text) : async Result.Result<Text, Text> {
-        let info = depositAddresses.get(depositAddress);
-        switch (info) {
-            case null { #err("No deposit found at address") };
-            case (?depositInfo) {
-                if (depositInfo.processed) {
-                    return #err("Deposit already processed");
-                };
-                
-                // Call Rust canister for EIP-1559 forwarding
-                let ethTxHandler = actor("hgyxy-raaaa-aaaar-qbpjq-cai") : actor {
-                    forward_deposit_eip1559 : (Principal, Blob, Text, Text, Text) -> async {#Ok: {tx_hash: Text; tx_hex: Text}; #Err: Text};
-                };
-                
-                let userHash = await keccak256(Text.encodeUtf8(Principal.toText(depositInfo.userId)));
-                let hashBytes = Blob.toArray(userHash);
-                let derivationPath = Blob.fromArray([hashBytes[0], hashBytes[1], hashBytes[2], hashBytes[3]]);
-                
-                let result = await ethTxHandler.forward_deposit_eip1559(
-                    depositInfo.userId,
-                    derivationPath,
-                    depositContractAddress,
-                    Nat.toText(depositInfo.amount),
-                    depositInfo.commitment
-                );
-                
-                switch (result) {
-                    case (#Ok(txResult)) {
-                        // Mark as processed
-                        depositAddresses.put(depositAddress, {
-                            commitment = depositInfo.commitment;
-                            amount = depositInfo.amount;
-                            timestamp = depositInfo.timestamp;
-                            userId = depositInfo.userId;
-                            processed = true;
-                        });
-                        #ok(txResult.tx_hash)
-                    };
-                    case (#Err(msg)) {
-                        #err("Rust canister error: " # msg)
-                    };
-                }
-            };
-        }
-    };
+    // DEPRECATED: Test function removed - use processSingleDepositV2 for production
+    // The Rust canister had issues with gas pricing, causing stuck transactions
     
-    // Test forwarding with Rust canister (legacy)
-    public func testRustForwarding(depositAddress: Text) : async Result.Result<Text, Text> {
-        let info = depositAddresses.get(depositAddress);
-        switch (info) {
-            case null { #err("No deposit found at address") };
-            case (?depositInfo) {
-                if (depositInfo.processed) {
-                    return #err("Deposit already processed");
-                };
-                
-                // Call Rust canister for forwarding
-                let ethTxHandler = actor("hgyxy-raaaa-aaaar-qbpjq-cai") : actor {
-                    forward_deposit : (Principal, Blob, Text, Text, Text) -> async {#Ok: {tx_hash: Text; tx_hex: Text}; #Err: Text};
-                };
-                
-                let userHash = await keccak256(Text.encodeUtf8(Principal.toText(depositInfo.userId)));
-                let hashBytes = Blob.toArray(userHash);
-                let derivationPath = Blob.fromArray([hashBytes[0], hashBytes[1], hashBytes[2], hashBytes[3]]);
-                
-                let result = await ethTxHandler.forward_deposit(
-                    depositInfo.userId,
-                    derivationPath,
-                    depositContractAddress,
-                    Nat.toText(depositInfo.amount),
-                    depositInfo.commitment
-                );
-                
-                switch (result) {
-                    case (#Ok(txResult)) {
-                        // Mark as processed
-                        depositAddresses.put(depositAddress, {
-                            commitment = depositInfo.commitment;
-                            amount = depositInfo.amount;
-                            timestamp = depositInfo.timestamp;
-                            userId = depositInfo.userId;
-                            processed = true;
-                        });
-                        #ok(txResult.tx_hash)
-                    };
-                    case (#Err(msg)) {
-                        #err("Rust canister error: " # msg)
-                    };
-                }
-            };
-        }
-    };
+    // DEPRECATED: Test function removed - use processSingleDepositV2 for production
+    // Legacy Rust canister implementation had critical gas pricing issues
     
     // Test simple ETH transfer
     public func testSimpleTransfer(fromAddress: Text) : async Result.Result<Text, Text> {
@@ -1803,7 +1715,7 @@ actor EthereumAdapter {
             // Get nonce
             ExperimentalCycles.add(2_000_000_000); // 2B cycles
             let nonceResult = await evmRpc.eth_getTransactionCount(
-                #EthMainnet(?[#PublicNode]),
+                #EthSepolia(?[#PublicNode]),
                 ?{
                     responseSizeEstimate = ?64;
                     responseConsensus = null;
@@ -1827,7 +1739,7 @@ actor EthereumAdapter {
                 nonce = nonce;
                 gasPrice = 1_000_000_000; // 1 gwei
                 gasLimit = 21000; // Standard ETH transfer gas
-                chainId = 1; // Ethereum mainnet
+                chainId = 11155111; // Sepolia testnet // Ethereum mainnet
             };
             
             // Sign transaction
@@ -1839,7 +1751,7 @@ actor EthereumAdapter {
             // Submit transaction
             ExperimentalCycles.add(2_000_000_000); // 2B cycles
             let submitResult = await evmRpc.eth_sendRawTransaction(
-                #EthMainnet(?[#PublicNode]),
+                #EthSepolia(?[#PublicNode]),
                 ?{
                     responseSizeEstimate = ?256;
                     responseConsensus = null;
@@ -1877,7 +1789,7 @@ actor EthereumAdapter {
             
             ExperimentalCycles.add(10_000_000_000); // 10B cycles
             let feeHistoryResult = await evmRpc.eth_feeHistory(
-                #EthMainnet(?[#PublicNode]),
+                #EthSepolia(?[#PublicNode]),
                 ?{
                     responseSizeEstimate = ?2048;
                     responseConsensus = null;
@@ -1940,7 +1852,7 @@ actor EthereumAdapter {
         
         ExperimentalCycles.add(2_000_000_000); // 2B cycles
         let gasPriceResult = await evmRpc.request(
-            #EthMainnet(#PublicNode),
+            #EthSepolia(#PublicNode),
             gasPriceRequest,
             1024
         );
@@ -1991,7 +1903,7 @@ actor EthereumAdapter {
             // Get nonce using EVM RPC canister
             ExperimentalCycles.add(2_000_000_000); // 2B cycles
             let nonceResult = await evmRpc.eth_getTransactionCount(
-                #EthMainnet(?[#PublicNode]),
+                #EthSepolia(?[#PublicNode]),
                 ?{
                     responseSizeEstimate = ?64;
                     responseConsensus = null;
@@ -2039,7 +1951,7 @@ actor EthereumAdapter {
             
             ExperimentalCycles.add(2_000_000_000); // 2B cycles
             let balanceResult = await evmRpc.request(
-                #EthMainnet(#PublicNode),
+                #EthSepolia(#PublicNode),
                 balanceRequest,
                 2048
             );
@@ -2105,7 +2017,7 @@ actor EthereumAdapter {
                 maxFeePerGas = maxFeePerGas;
                 maxPriorityFeePerGas = gasPrices.maxPriorityFee;
                 gasLimit = gasLimit;
-                chainId = 1; // Ethereum mainnet
+                chainId = 11155111; // Sepolia testnet // Ethereum mainnet
             };
             
             Debug.print("EIP-1559 Transaction details: to=" # depositContractAddress # 
@@ -2133,7 +2045,7 @@ actor EthereumAdapter {
                             let depositResult = await depositManager.deposit(
                                 amountToForward,
                                 "ETH",
-                                1, // Mainnet chain ID
+                                11155111, // Sepolia testnet chain ID
                                 info.commitment
                             );
                             switch (depositResult) {
@@ -2182,52 +2094,10 @@ actor EthereumAdapter {
         }
     };
 
-    // Process a single deposit address using EIP-1559
+    // Process a single deposit address using EIP-1559 (redirects to V2)
     public shared(msg) func processSingleDepositEIP1559(address: Text) : async Result.Result<Text, Text> {
-        // Find the deposit info
-        switch (depositAddresses.get(address)) {
-            case null { #err("Deposit address not found") };
-            case (?info) {
-                if (info.processed) {
-                    return #err("Deposit already processed");
-                };
-                
-                // Ensure deposit contract is set
-                if (depositContractAddress == "") {
-                    return #err("Deposit contract address not set");
-                };
-                
-                try {
-                    Debug.print("Processing single deposit at " # address # " using EIP-1559");
-                    
-                    // Forward funds to pool contract using EIP-1559
-                    let forwardResult = await forwardFundsToPoolEIP1559(address, info);
-                    
-                    switch (forwardResult) {
-                        case (#ok(txHash)) {
-                            // Mark as processed
-                            depositAddresses.put(address, {
-                                commitment = info.commitment;
-                                amount = info.amount;
-                                timestamp = info.timestamp;
-                                userId = info.userId;
-                                processed = true;
-                            });
-                            
-                            // Track processed deposit
-                            processedDeposits.put(info.commitment, Time.now());
-                            
-                            #ok(txHash)
-                        };
-                        case (#err(e)) {
-                            #err("Failed to forward from " # address # ": " # e)
-                        };
-                    };
-                } catch (e) {
-                    #err("Error processing " # address # ": " # Error.message(e))
-                };
-            };
-        }
+        // Redirect to V2 implementation which has better gas handling and transaction monitoring
+        await processSingleDepositV2(address)
     };
 
     // Process single deposit with V2 address derivation
@@ -2291,7 +2161,7 @@ actor EthereumAdapter {
                                             let depositResult = await depositManager.deposit(
                                                 info.amount,
                                                 "ETH",
-                                                1, // Ethereum mainnet
+                                                11155111, // Sepolia testnet
                                                 info.commitment
                                             );
                                             
@@ -2400,7 +2270,7 @@ actor EthereumAdapter {
                 let depositResult = await depositManager.deposit(
                     info.amount,
                     "ETH",
-                    1, // Ethereum mainnet
+                    11155111, // Sepolia testnet
                     info.commitment
                 );
                 
@@ -2423,7 +2293,7 @@ actor EthereumAdapter {
             // Get nonce using EVM RPC canister
             ExperimentalCycles.add(2_000_000_000); // 2B cycles
             let nonceResult = await evmRpc.eth_getTransactionCount(
-                #EthMainnet(?[#PublicNode]),
+                #EthSepolia(?[#PublicNode]),
                 ?{
                     responseSizeEstimate = ?64;
                     responseConsensus = null;
@@ -2471,7 +2341,7 @@ actor EthereumAdapter {
             
             ExperimentalCycles.add(2_000_000_000); // 2B cycles
             let balanceResult = await evmRpc.request(
-                #EthMainnet(#PublicNode),
+                #EthSepolia(#PublicNode),
                 balanceRequest,
                 2048
             );
@@ -2527,7 +2397,7 @@ actor EthereumAdapter {
                 maxFeePerGas = maxFeePerGas;
                 maxPriorityFeePerGas = gasPrices.maxPriorityFee;
                 gasLimit = gasLimit;
-                chainId = 1; // Ethereum mainnet
+                chainId = 11155111; // Sepolia testnet // Ethereum mainnet
             };
             
             // CRITICAL: Use V2 derivation path (userId + commitment + timestamp)
@@ -2557,7 +2427,7 @@ actor EthereumAdapter {
                             let depositResult = await depositManager.deposit(
                                 amountToForward,
                                 "ETH",
-                                1, // Mainnet chain ID
+                                11155111, // Sepolia testnet chain ID
                                 info.commitment
                             );
                             switch (depositResult) {
@@ -2610,7 +2480,7 @@ actor EthereumAdapter {
             ExperimentalCycles.add(2_000_000_000); // 2B cycles to ensure enough for receipt call
             
             let receiptResult = await evmRpc.eth_getTransactionReceipt(
-                #EthMainnet(?[#PublicNode]),
+                #EthSepolia(?[#PublicNode]),
                 ?{
                     responseSizeEstimate = ?500;
                     responseConsensus = null;
@@ -2828,7 +2698,7 @@ actor EthereumAdapter {
             
             ExperimentalCycles.add(2_000_000_000);
             let balanceResult = await evmRpc.request(
-                #EthMainnet(#PublicNode),
+                #EthSepolia(#PublicNode),
                 balanceRequest,
                 2048
             );
@@ -2874,7 +2744,7 @@ actor EthereumAdapter {
             // Get nonce
             ExperimentalCycles.add(2_000_000_000);
             let nonceResult = await evmRpc.eth_getTransactionCount(
-                #EthMainnet(?[#PublicNode]),
+                #EthSepolia(?[#PublicNode]),
                 ?{ responseSizeEstimate = ?64; responseConsensus = null; },
                 { address = fromAddress; block = #Latest; }
             );
@@ -2895,7 +2765,7 @@ actor EthereumAdapter {
                 maxFeePerGas = maxFeePerGas;
                 maxPriorityFeePerGas = gasPrices.maxPriorityFee;
                 gasLimit = gasLimit;
-                chainId = 1;
+                chainId = 11155111; // Sepolia testnet
             };
             
             // Sign and submit with the correct derivation path
@@ -2983,7 +2853,7 @@ actor EthereumAdapter {
                             maxFeePerGas = 1000000000;
                             maxPriorityFeePerGas = 1000000000;
                             gasLimit = 21000;
-                            chainId = 1;
+                            chainId = 11155111; // Sepolia testnet
                         };
                         
                         // Try to sign it
@@ -3030,7 +2900,7 @@ actor EthereumAdapter {
         Debug.print("Signed transaction hex: " # signedTxV0);
         ExperimentalCycles.add(10_000_000_000); // 10B cycles
         let submitResultV0 = await evmRpc.eth_sendRawTransaction(
-            #EthMainnet(?[#PublicNode]),
+            #EthSepolia(?[#PublicNode]),
             ?{
                 responseSizeEstimate = ?256;
                 responseConsensus = null;
@@ -3055,7 +2925,7 @@ actor EthereumAdapter {
                 
                 ExperimentalCycles.add(10_000_000_000); // 10B cycles
                 let submitResultV1 = await evmRpc.eth_sendRawTransaction(
-                    #EthMainnet(?[#PublicNode]),
+                    #EthSepolia(?[#PublicNode]),
                     ?{
                         responseSizeEstimate = ?256;
                         responseConsensus = null;

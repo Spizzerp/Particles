@@ -22,7 +22,7 @@ program
 program
     .command('tx-analyze')
     .description('Analyze transaction parameters and signing')
-    .option('-t, --to <address>', 'Target address', '0x8626502727D7faf282C44df18B34E50D0DB45Eae')
+    .option('-t, --to <address>', 'Target address', '0xd72114Ae0a3E80B921Ca26aB522F9Fa656a6c2e1')
     .option('-v, --value <eth>', 'Value in ETH', '0.001')
     .option('-n, --nonce <number>', 'Transaction nonce', '0')
     .option('-g, --gas-price <gwei>', 'Gas price in gwei', '1')

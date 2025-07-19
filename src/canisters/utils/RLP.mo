@@ -95,6 +95,8 @@ module {
     
     // Helper to encode Nat as bytes (big-endian)
     public func natToBytes(n: Nat) : Blob {
+        // RLP spec: zero is encoded as empty bytes
+        // This is correct for RLP encoding itself
         if (n == 0) { return Blob.fromArray([]) };
         
         let buffer = Buffer.Buffer<Nat8>(32);

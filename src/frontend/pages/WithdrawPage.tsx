@@ -214,9 +214,10 @@ const WithdrawPage: React.FC = () => {
       // Map chain names to chain IDs
       const getChainId = (chain: string): bigint => {
         const chainMap: { [key: string]: bigint } = {
-          'ETH': 1n,        // Ethereum mainnet
-          'ethereum': 1n,
-          '1': 1n,
+          'ETH': 11155111n,        // Sepolia testnet
+          'ethereum': 11155111n,
+          '1': 11155111n,
+          '11155111': 11155111n,
           'ICP': 0n,        // ICP uses 0 as chain ID
           'BTC': 0n,        // Bitcoin (not EVM)
           '137': 137n,      // Polygon
@@ -235,8 +236,8 @@ const WithdrawPage: React.FC = () => {
         try {
           return BigInt(chain);
         } catch {
-          console.warn(`Unknown chain: ${chain}, defaulting to Ethereum mainnet (1)`);
-          return 1n; // Default to Ethereum mainnet
+          console.warn(`Unknown chain: ${chain}, defaulting to Sepolia testnet (11155111)`);
+          return 11155111n; // Default to Sepolia testnet
         }
       };
       

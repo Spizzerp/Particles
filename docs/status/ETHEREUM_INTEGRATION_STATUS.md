@@ -3,7 +3,8 @@
 ## 🎉 What's Complete
 
 ### 1. Smart Contract Infrastructure ✅
-- **Sepolia Contract**: `0x9b0721C174b103facEC1EeE435679Ae9C493163C`
+- **Current Sepolia Contract**: `0xd72114Ae0a3E80B921Ca26aB522F9Fa656a6c2e1` (Active)
+- **Mainnet Contract**: See `/MAINNET_CONTRACT_INFO.md` for recovery details
 - **Status**: Live with 0.1 ETH test deposit
 - **Features**: Accepts commitments, emits events, controlled withdrawals
 
