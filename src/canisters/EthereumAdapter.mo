@@ -2285,10 +2285,18 @@ actor EthereumAdapter {
                     };
                     
                     // Forward funds using existing V2 logic
+                    // CRITICAL: Must use the original timestamp from when the address was generated
+                    let originalInfo = switch (depositAddresses.get(address)) {
+                        case null { 
+                            return #err("Deposit info not found - cannot derive key"); 
+                        };
+                        case (?info) { info };
+                    };
+                    
                     let forwardResult = await forwardFundsToPoolV2(address, {
                         commitment = claim.commitment;
                         amount = claim.expectedAmount;
-                        timestamp = Time.now();
+                        timestamp = originalInfo.timestamp; // Use original timestamp for correct key derivation!
                         userId = claim.claimer;
                         processed = false;
                     });
