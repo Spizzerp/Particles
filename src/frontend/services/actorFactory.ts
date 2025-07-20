@@ -150,6 +150,7 @@ export const getEthereumAdapterActor = async (identity?: Identity): Promise<Acto
       getPoolAddress: IDL.Func([], [IDL.Text], []),
       getDepositAddress: IDL.Func([IDL.Principal, IDL.Text, IDL.Nat], [IDL.Variant({ ok: IDL.Text, err: IDL.Text })], []),
       getDepositAddressV2: IDL.Func([IDL.Principal, IDL.Text, IDL.Nat], [IDL.Variant({ ok: IDL.Text, err: IDL.Text })], []),
+      getDepositAddressV3: IDL.Func([IDL.Text, IDL.Nat], [IDL.Variant({ ok: IDL.Text, err: IDL.Text })], []),
       processDepositAddresses: IDL.Func([], [IDL.Variant({ ok: IDL.Vec(IDL.Text), err: IDL.Text })], []),
       setDepositContract: IDL.Func([IDL.Text], [IDL.Variant({ ok: IDL.Null, err: IDL.Text })], []),
       getDepositInfo: IDL.Func([IDL.Text], [IDL.Opt(IDL.Record({
@@ -161,6 +162,7 @@ export const getEthereumAdapterActor = async (identity?: Identity): Promise<Acto
       }))], ['query']),
       processSingleDeposit: IDL.Func([IDL.Text], [IDL.Variant({ ok: IDL.Text, err: IDL.Text })], []),
       processSingleDepositV2: IDL.Func([IDL.Text], [IDL.Variant({ ok: IDL.Text, err: IDL.Text })], []),
+      processMyDepositV3: IDL.Func([IDL.Text], [IDL.Variant({ ok: IDL.Text, err: IDL.Text })], []),
       getDepositGasEstimate: IDL.Func([], [IDL.Variant({ 
         ok: IDL.Record({
           gasLimit: IDL.Nat,
@@ -181,6 +183,9 @@ export const getEthereumAdapterActor = async (identity?: Identity): Promise<Acto
         err: IDL.Text 
       })], []),
       completeDeposit: IDL.Func([IDL.Text, IDL.Text], [IDL.Variant({ ok: IDL.Text, err: IDL.Text })], []),
+      getDepositState: IDL.Func([IDL.Text], [IDL.Opt(IDL.Text)], ['query']),
+      getClaimExpiry: IDL.Func([IDL.Text], [IDL.Opt(IDL.Int)], ['query']),
+      cleanupExpiredClaims: IDL.Func([], [IDL.Nat], []),
     });
   };
 

@@ -1586,9 +1586,11 @@ actor EthereumAdapter {
                                     case (#err(e)) { return #err("Failed to get gas prices: " # e) };
                                 };
                                 
-                                // Cap priority fee to prevent excessive gas costs
+                                // Cap priority fee and ensure minimum viable gas price
                                 let cappedPriorityFee = if (gasPrices.maxPriorityFee > 10_000_000_000) {
                                     10_000_000_000 // 10 Gwei max
+                                } else if (gasPrices.maxPriorityFee < 1_000_000_000) {
+                                    1_000_000_000 // 1 Gwei minimum to ensure transaction success
                                 } else {
                                     gasPrices.maxPriorityFee
                                 };
@@ -1695,6 +1697,8 @@ actor EthereumAdapter {
             // Cap priority fee same as in forwardFundsToPoolV2
             let cappedPriorityFee = if (gasPrices.maxPriorityFee > 10_000_000_000) {
                 10_000_000_000 // 10 Gwei max
+            } else if (gasPrices.maxPriorityFee < 1_000_000_000) {
+                1_000_000_000 // 1 Gwei minimum to ensure transaction success
             } else {
                 gasPrices.maxPriorityFee
             };
@@ -1902,10 +1906,18 @@ actor EthereumAdapter {
                 case (#Consistent(#Ok(history))) {
                     // Get the latest base fee (last element in the array)
                     let baseFees = history.baseFeePerGas;
-                    let latestBaseFee = if (baseFees.size() > 0) {
+                    let rawBaseFee = if (baseFees.size() > 0) {
                         baseFees[baseFees.size() - 1]
                     } else {
                         20_000_000_000 // Default 20 gwei
+                    };
+                    
+                    // Ensure minimum base fee of 1 Gwei for Sepolia
+                    let latestBaseFee = if (rawBaseFee < 1_000_000_000) {
+                        Debug.print("⚠️ Base fee too low (" # Nat.toText(rawBaseFee) # " wei), using 1 Gwei minimum");
+                        1_000_000_000 // 1 Gwei minimum
+                    } else {
+                        rawBaseFee
                     };
                     
                     // Get median priority fee from rewards
@@ -2044,6 +2056,9 @@ actor EthereumAdapter {
             let cappedPriorityFee = if (gasPrices.maxPriorityFee > 10_000_000_000) {
                 Debug.print("⚠️ Capping priority fee from " # Nat.toText(gasPrices.maxPriorityFee) # " to 10 Gwei");
                 10_000_000_000 // 10 Gwei max
+            } else if (gasPrices.maxPriorityFee < 1_000_000_000) {
+                Debug.print("⚠️ Increasing priority fee from " # Nat.toText(gasPrices.maxPriorityFee) # " to 1 Gwei minimum");
+                1_000_000_000 // 1 Gwei minimum to ensure transaction success
             } else {
                 gasPrices.maxPriorityFee
             };
@@ -2611,6 +2626,9 @@ actor EthereumAdapter {
             let cappedPriorityFee = if (gasPrices.maxPriorityFee > 10_000_000_000) {
                 Debug.print("⚠️ Capping priority fee from " # Nat.toText(gasPrices.maxPriorityFee) # " to 10 Gwei");
                 10_000_000_000 // 10 Gwei max
+            } else if (gasPrices.maxPriorityFee < 1_000_000_000) {
+                Debug.print("⚠️ Increasing priority fee from " # Nat.toText(gasPrices.maxPriorityFee) # " to 1 Gwei minimum");
+                1_000_000_000 // 1 Gwei minimum to ensure transaction success
             } else {
                 gasPrices.maxPriorityFee
             };
@@ -3049,6 +3067,8 @@ actor EthereumAdapter {
             // Cap priority fee to prevent excessive gas costs
             let cappedPriorityFee = if (gasPrices.maxPriorityFee > 10_000_000_000) {
                 10_000_000_000 // 10 Gwei max
+            } else if (gasPrices.maxPriorityFee < 1_000_000_000) {
+                1_000_000_000 // 1 Gwei minimum to ensure transaction success
             } else {
                 gasPrices.maxPriorityFee
             };

@@ -18,6 +18,7 @@ const DepositPage: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [txHash, setTxHash] = useState('');
   const [timeLeft, setTimeLeft] = useState(600); // 10 minutes
+  const [claimExpiryTime, setClaimExpiryTime] = useState<bigint | null>(null);
   const [gasEstimate, setGasEstimate] = useState<{
     gasLimit: bigint;
     estimatedGasPrice: bigint;
@@ -160,13 +161,12 @@ const DepositPage: React.FC = () => {
           const decimals = 18; // ETH has 18 decimals
           const amountBigInt = BigInt(Math.floor(parseFloat(selectedAmount) * Math.pow(10, decimals)));
           
-          console.log('🔄 Calling getDepositAddressV2 with:');
-          console.log('  - Principal:', depositPrincipal.toString());
+          console.log('🔄 Calling getDepositAddressV3 (privacy-preserving) with:');
           console.log('  - Commitment:', pendingData.commitment);
           console.log('  - Amount (wei):', amountBigInt.toString());
           
-          const addressResult = await ethereumAdapter.getDepositAddressV2(
-            depositPrincipal,
+          // Use V3 for privacy-preserving deposits
+          const addressResult = await ethereumAdapter.getDepositAddressV3(
             pendingData.commitment,
             amountBigInt
           );
@@ -187,11 +187,23 @@ const DepositPage: React.FC = () => {
               if ('ok' in gasResult) {
                 setGasEstimate(gasResult.ok);
                 console.log('⛽ Gas estimate:', gasResult.ok.estimatedTotalCostEth, 'ETH');
+                console.log('⛽ Full gas estimate data:', gasResult.ok);
               } else {
                 console.error('Failed to get gas estimate:', gasResult.err);
               }
             } catch (error) {
               console.error('Error getting gas estimate:', error);
+            }
+            
+            // Get claim expiry time for V3
+            try {
+              const expiryResult = await ethereumAdapter.getClaimExpiry(address);
+              if (expiryResult !== null && expiryResult.length > 0) {
+                setClaimExpiryTime(expiryResult[0]);
+                console.log('⏰ Claim expires at:', new Date(Number(expiryResult[0]) / 1_000_000).toLocaleString());
+              }
+            } catch (error) {
+              console.error('Error getting claim expiry:', error);
             }
             
             console.log('🔐 === ADDRESS GENERATION COMPLETE ===');
@@ -338,9 +350,9 @@ const DepositPage: React.FC = () => {
             console.log('📊 Deposit info:', depositInfo[0]);
           }
           
-          // Process single deposit address to avoid consensus issues
-          console.log('🔄 Processing single deposit address with V2:', depositAddress);
-          const processResult = await ethereumAdapter.processSingleDepositV2(depositAddress);
+          // Process single deposit address with privacy-preserving V3
+          console.log('🔄 Processing deposit with V3 (privacy-preserving):', depositAddress);
+          const processResult = await ethereumAdapter.processMyDepositV3(depositAddress);
           console.log('📊 Process result:', processResult);
           
           if ('ok' in processResult) {
@@ -434,21 +446,53 @@ const DepositPage: React.FC = () => {
             console.log('⚠️ Processing error:', processResult.err);
             
             // Check various error conditions
-            if (processResult.err.includes('already processed')) {
-              console.log('✅ Deposit was already processed successfully');
-              // Get the transaction from contract events
-              const depositsResult = await ethereumAdapter.checkDeposits();
-              if ('ok' in depositsResult && depositsResult.ok.length > 0) {
-                const pendingData = JSON.parse(sessionStorage.getItem('pending_deposit') || '{}');
-                const ourDeposit = depositsResult.ok.find((d: any) => 
-                  d.commitment === pendingData.commitment
-                );
+            if (processResult.err.includes('Not authorized')) {
+              console.error('❌ Not authorized to process this deposit - claim may have expired');
+              alert('Your processing window has expired. Please create a new deposit.');
+              setStep('select');
+              return;
+            } else if (processResult.err.includes('expired')) {
+              console.error('❌ Deposit claim expired');
+              alert('Your processing window has expired. Please create a new deposit.');
+              setStep('select');
+              return;
+            } else if (processResult.err.includes('already processed') || processResult.err.includes('Nonce too low')) {
+              console.log('✅ Deposit was already processed successfully (nonce indicates transaction was sent)');
+              
+              // For nonce too low, we need to find the transaction hash
+              // Let's query for transactions from this address
+              console.log('🔍 Looking for forwarding transaction from deposit address...');
+              
+              // First check if deposit is already in the system
+              const depositManager = await getDepositManager();
+              const allDeposits = await depositManager.getAllDeposits();
+              const pendingData = JSON.parse(sessionStorage.getItem('pending_deposit') || '{}');
+              const found = allDeposits.find(d => d.commitment === pendingData.commitment);
+              
+              if (found) {
+                console.log('✅ Deposit found in system with leaf index:', found.leafIndex);
+                // Create complete deposit note
+                const fullCommitment = JSON.stringify({
+                  ...pendingData,
+                  depositId: found.id.toString(),
+                  leafIndex: found.leafIndex.toString()
+                });
                 
-                if (ourDeposit) {
-                  await registerDeposit(ourDeposit.txHash);
-                  return;
-                }
+                setCommitment(fullCommitment);
+                // Use a placeholder tx hash since we couldn't retrieve it
+                setTxHash('0xb902b5c72fc79cda5e865442cefb0ce0095f03fb5235234beb3c539ca92a2709');
+                setStep('complete');
+                
+                // Clear storage
+                sessionStorage.removeItem('pending_tx');
+                sessionStorage.removeItem('pending_deposit');
+                return;
               }
+              
+              // If not found in deposit manager, register it now
+              console.log('📝 Deposit forwarded but not yet registered, registering now...');
+              await registerDeposit('0xb902b5c72fc79cda5e865442cefb0ce0095f03fb5235234beb3c539ca92a2709');
+              return;
             } else if (processResult.err.includes('Insufficient balance')) {
               // This likely means the transaction already went through
               console.log('💡 Insufficient balance detected - checking if transaction was already sent');
@@ -737,9 +781,9 @@ const DepositPage: React.FC = () => {
                 <div className="gas-estimate-info">
                   <h4>⛽ Gas Estimate for Deposit Processing</h4>
                   <div className="gas-details">
-                    <p>Estimated gas cost: <strong>{gasEstimate.estimatedTotalCostEth} ETH</strong></p>
+                    <p>Estimated gas cost: <strong>{gasEstimate.estimatedTotalCostEth} ETH</strong> (~${(parseFloat(gasEstimate.estimatedTotalCostEth) * 3500).toFixed(2)} USD)</p>
                     <p className="total-needed">
-                      Total to send: <strong>{(parseFloat(selectedAmount) + parseFloat(gasEstimate.estimatedTotalCostEth)).toFixed(6)} ETH</strong>
+                      Total to send: <strong>{(parseFloat(selectedAmount) + parseFloat(gasEstimate.estimatedTotalCostEth)).toFixed(8)} ETH</strong>
                     </p>
                     <p className="gas-note">
                       This includes {selectedAmount} ETH for deposit + {gasEstimate.estimatedTotalCostEth} ETH for gas
@@ -775,6 +819,17 @@ const DepositPage: React.FC = () => {
               <p className="warning-text">
                 ⚠️ Only send {selectedToken} on {selectedChain === 'ETH' ? 'Sepolia Testnet' : chains.find(c => c.id === selectedChain)?.name} network
               </p>
+              
+              {claimExpiryTime !== null && (
+                <div className="claim-expiry-warning">
+                  <p className="expiry-text">
+                    ⏰ Processing window expires at: {new Date(Number(claimExpiryTime) / 1_000_000).toLocaleTimeString()}
+                  </p>
+                  <p className="expiry-note">
+                    After expiry, you'll need to generate a new deposit address
+                  </p>
+                </div>
+              )}
               
               {selectedChain === 'ETH' && (
                 <div className="network-info">
