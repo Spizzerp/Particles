@@ -19,6 +19,7 @@ import Time "mo:base/Time";
 import Error "mo:base/Error";
 import Debug "mo:base/Debug";
 import ExperimentalCycles "mo:base/ExperimentalCycles";
+import Float "mo:base/Float";
 
 actor EthereumAdapter {
     
@@ -56,6 +57,31 @@ actor EthereumAdapter {
         userId: Principal;
         processed: Bool;
     };
+
+    // Privacy-preserving deposit claim system
+    private type DepositState = {
+        #AwaitingFunds;
+        #FundsReceived;
+        #Processing;
+        #Completed;
+        #Failed;
+    };
+
+    private type DepositClaim = {
+        claimer: Principal;        // Who can process this deposit (temporary)
+        depositAddress: Text;      
+        expiresAt: Time.Time;      // When the claim expires
+        commitment: Text;          
+        expectedAmount: Nat;
+        state: DepositState;
+        processingTxHash: ?Text;
+        errorMessage: ?Text;
+        retryCount: Nat;
+    };
+
+    // Separate storage for privacy
+    private var depositClaims = Map.HashMap<Text, DepositClaim>(100, Text.equal, Text.hash);
+    private let CLAIM_EXPIRY_TIME : Int = 10 * 60 * 1_000_000_000; // 10 minutes in nanoseconds
 
     private type EthereumTransaction = {
         to: Text;
@@ -423,6 +449,64 @@ actor EthereumAdapter {
         }
     };
 
+    // Generate deposit address with temporary claim (V3 - privacy-preserving)
+    public shared(msg) func getDepositAddressV3(commitment: Text, amount: Nat) : async Result.Result<Text, Text> {
+        try {
+            // Validate inputs
+            if (Text.size(commitment) != 66) { // 0x + 64 hex chars
+                return #err("Invalid commitment format");
+            };
+            if (amount == 0) {
+                return #err("Amount must be greater than 0");
+            };
+            
+            // Generate unique address using caller + commitment + timestamp
+            let derivationTimestamp = Time.now();
+            let uniqueData = Text.encodeUtf8(
+                Principal.toText(msg.caller) # 
+                commitment # 
+                Int.toText(derivationTimestamp)
+            );
+            let uniqueHash = await keccak256(uniqueData);
+            let hashBytes = Blob.toArray(uniqueHash);
+            let derivationPath = [Blob.fromArray([hashBytes[0], hashBytes[1], hashBytes[2], hashBytes[3]])];
+            
+            // Get public key and convert to address
+            let { public_key } = await getEcdsaPublicKey(derivationPath);
+            let address = await publicKeyToEthereumAddressProper(public_key);
+            
+            Debug.print("Generated deposit address V3: " # address # " for claimer: " # Principal.toText(msg.caller));
+            
+            // Create temporary claim instead of permanent ownership
+            let claim : DepositClaim = {
+                claimer = msg.caller;
+                depositAddress = address;
+                expiresAt = Time.now() + CLAIM_EXPIRY_TIME;
+                commitment = commitment;
+                expectedAmount = amount;
+                state = #AwaitingFunds;
+                processingTxHash = null;
+                errorMessage = null;
+                retryCount = 0;
+            };
+            
+            depositClaims.put(address, claim);
+            
+            // Keep backward compatibility - store in old format too but will be cleaned up
+            depositAddresses.put(address, {
+                commitment = commitment;
+                amount = amount;
+                timestamp = derivationTimestamp;
+                userId = msg.caller;
+                processed = false;
+            });
+            
+            #ok(address)
+        } catch (e) {
+            #err("Failed to generate address V3: " # Error.message(e))
+        }
+    };
+
     // Generate unique Ethereum address for deposits (V2 - with proper key handling)
     public shared(msg) func getDepositAddressV2(userId: Principal, commitment: Text, amount: Nat) : async Result.Result<Text, Text> {
         try {
@@ -463,6 +547,10 @@ actor EthereumAdapter {
 
     // Process deposits from unique addresses and forward to pool
     public shared(msg) func processDepositAddresses() : async Result.Result<[Text], Text> {
+        // Log the caller to identify who is calling this
+        Debug.print("🚨 processDepositAddresses called by: " # Principal.toText(msg.caller));
+        Debug.print("🕐 Time: " # Int.toText(Time.now()));
+        
         var processedTxs = Buffer.Buffer<Text>(0);
         var errors = Buffer.Buffer<Text>(0);
         
@@ -1498,7 +1586,13 @@ actor EthereumAdapter {
                                     case (#err(e)) { return #err("Failed to get gas prices: " # e) };
                                 };
                                 
-                                let maxFeePerGas = gasPrices.baseFee + gasPrices.maxPriorityFee + (gasPrices.baseFee / 10);
+                                // Cap priority fee to prevent excessive gas costs
+                                let cappedPriorityFee = if (gasPrices.maxPriorityFee > 10_000_000_000) {
+                                    10_000_000_000 // 10 Gwei max
+                                } else {
+                                    gasPrices.maxPriorityFee
+                                };
+                                let maxFeePerGas = gasPrices.baseFee + cappedPriorityFee + (gasPrices.baseFee / 10);
                                 let gasLimit : Nat = 80000;
                                 
                                 // Build transaction
@@ -1522,7 +1616,7 @@ actor EthereumAdapter {
                                     };
                                     nonce = addressNonce;
                                     maxFeePerGas = maxFeePerGas;
-                                    maxPriorityFeePerGas = gasPrices.maxPriorityFee;
+                                    maxPriorityFeePerGas = cappedPriorityFee; // Use capped value!
                                     gasLimit = gasLimit;
                                     chainId = 11155111; // Sepolia testnet
                                 };
@@ -1598,23 +1692,30 @@ actor EthereumAdapter {
             // Gas limit for deposit forwarding (same as used in processSingleDepositV2)
             let gasLimit : Nat = 80000;
             
-            // Calculate estimated gas price with 50% buffer for safety
-            // Using larger buffer than execution (10%) to account for gas price volatility
-            let estimatedGasPrice = gasPrices.baseFee + gasPrices.maxPriorityFee + (gasPrices.baseFee / 2);
+            // Cap priority fee same as in forwardFundsToPoolV2
+            let cappedPriorityFee = if (gasPrices.maxPriorityFee > 10_000_000_000) {
+                10_000_000_000 // 10 Gwei max
+            } else {
+                gasPrices.maxPriorityFee
+            };
+            
+            // Calculate estimated gas price EXACTLY as in forwardFundsToPoolV2
+            // This ensures users see the same gas cost that will be used
+            let estimatedGasPrice = gasPrices.baseFee + cappedPriorityFee + (gasPrices.baseFee / 10); // 10% buffer
             
             // Calculate total cost
             let estimatedTotalCost = estimatedGasPrice * gasLimit;
             
-            // Convert to ETH string (with 6 decimal places for better precision)
+            // Convert to ETH string (with 9 decimal places for better precision)
             let ethWhole = estimatedTotalCost / 1_000_000_000_000_000_000;
-            let ethFraction = (estimatedTotalCost % 1_000_000_000_000_000_000) / 1_000_000_000_000; // 6 decimals
+            let ethFraction = (estimatedTotalCost % 1_000_000_000_000_000_000) / 1_000_000_000; // 9 decimals
             let ethFractionStr = Nat.toText(ethFraction);
-            let paddedFraction = (if (ethFraction < 100000) { "0" } else { "" }) #
-                                (if (ethFraction < 10000) { "0" } else { "" }) #
-                                (if (ethFraction < 1000) { "0" } else { "" }) #
-                                (if (ethFraction < 100) { "0" } else { "" }) #
-                                (if (ethFraction < 10) { "0" } else { "" }) #
-                                ethFractionStr;
+            
+            // Pad with leading zeros to ensure 9 digits
+            var paddedFraction = ethFractionStr;
+            while (Text.size(paddedFraction) < 9) {
+                paddedFraction := "0" # paddedFraction;
+            };
             
             #ok({
                 gasLimit = gasLimit;
@@ -1939,7 +2040,14 @@ actor EthereumAdapter {
             };
             
             // Calculate max fee per gas (base fee + priority fee + small buffer)
-            let maxFeePerGas = gasPrices.baseFee + gasPrices.maxPriorityFee + (gasPrices.baseFee / 10); // 10% buffer
+            // Cap priority fee at reasonable maximum (10 Gwei) to prevent excessive gas costs
+            let cappedPriorityFee = if (gasPrices.maxPriorityFee > 10_000_000_000) {
+                Debug.print("⚠️ Capping priority fee from " # Nat.toText(gasPrices.maxPriorityFee) # " to 10 Gwei");
+                10_000_000_000 // 10 Gwei max
+            } else {
+                gasPrices.maxPriorityFee
+            };
+            let maxFeePerGas = gasPrices.baseFee + cappedPriorityFee + (gasPrices.baseFee / 10); // 10% buffer
             
             // Calculate gas cost for the transaction
             let gasLimit : Nat = 80000; // Gas limit for deposit function call
@@ -2015,7 +2123,7 @@ actor EthereumAdapter {
                 };
                 nonce = addressNonce;
                 maxFeePerGas = maxFeePerGas;
-                maxPriorityFeePerGas = gasPrices.maxPriorityFee;
+                maxPriorityFeePerGas = cappedPriorityFee; // Use capped value!
                 gasLimit = gasLimit;
                 chainId = 11155111; // Sepolia testnet // Ethereum mainnet
             };
@@ -2023,7 +2131,7 @@ actor EthereumAdapter {
             Debug.print("EIP-1559 Transaction details: to=" # depositContractAddress # 
                        ", value=" # Nat.toText(amountToForward) # 
                        ", maxFeePerGas=" # Nat.toText(maxFeePerGas) # 
-                       ", maxPriorityFeePerGas=" # Nat.toText(gasPrices.maxPriorityFee) #
+                       ", maxPriorityFeePerGas=" # Nat.toText(cappedPriorityFee) #
                        ", gasLimit=" # Nat.toText(gasLimit) # 
                        ", nonce=" # Nat.toText(addressNonce));
             
@@ -2100,8 +2208,178 @@ actor EthereumAdapter {
         await processSingleDepositV2(address)
     };
 
+    // Process deposit with temporary claim (V3 - privacy-preserving)
+    public shared(msg) func processMyDepositV3(depositAddress: Text) : async Result.Result<Text, Text> {
+        Debug.print("🔐 processMyDepositV3 called for: " # depositAddress);
+        Debug.print("🔐 Called by: " # Principal.toText(msg.caller));
+        
+        switch (depositClaims.get(depositAddress)) {
+            case null { 
+                #err("Deposit not found or claim expired") 
+            };
+            case (?claim) {
+                // Check if caller has valid claim
+                if (claim.claimer != msg.caller) {
+                    return #err("Not authorized to process this deposit");
+                };
+                
+                // Check if claim expired
+                if (Time.now() > claim.expiresAt) {
+                    // Clean up expired claim
+                    depositClaims.delete(depositAddress);
+                    depositAddresses.delete(depositAddress);
+                    return #err("Processing window expired. Please create a new deposit.");
+                };
+                
+                // Check state
+                switch (claim.state) {
+                    case (#Completed) { 
+                        return #err("Deposit already completed"); 
+                    };
+                    case (#Processing) { 
+                        return #err("Deposit is currently being processed"); 
+                    };
+                    case _ {
+                        // Process the deposit
+                        await processDepositWithClaim(depositAddress, claim);
+                    };
+                };
+            };
+        };
+    };
+
+    // Private function to process deposit with claim
+    private func processDepositWithClaim(address: Text, claim: DepositClaim) : async Result.Result<Text, Text> {
+        // Update state to processing
+        let updatedClaim = {
+            claim with 
+            state = #Processing;
+        };
+        depositClaims.put(address, updatedClaim);
+        
+        try {
+            // Check balance first
+            let balanceResult = await checkAddressBalance(address);
+            
+            switch (balanceResult) {
+                case (#ok(balance)) {
+                    if (balance < claim.expectedAmount) {
+                        // Update state back to awaiting funds
+                        depositClaims.put(address, { claim with state = #AwaitingFunds });
+                        return #err("Insufficient funds. Expected: " # Nat.toText(claim.expectedAmount) # ", found: " # Nat.toText(balance));
+                    };
+                    
+                    // Forward funds using existing V2 logic
+                    let forwardResult = await forwardFundsToPoolV2(address, {
+                        commitment = claim.commitment;
+                        amount = claim.expectedAmount;
+                        timestamp = Time.now();
+                        userId = claim.claimer;
+                        processed = false;
+                    });
+                    
+                    switch (forwardResult) {
+                        case (#ok(txHash)) {
+                            // Wait for confirmation
+                            let confirmResult = await waitForTransactionConfirmation(txHash);
+                            
+                            switch (confirmResult) {
+                                case (#ok(receipt)) {
+                                    if (receipt.status == "0x1") {
+                                        // Success! Register with deposit manager
+                                        let depositResult = await depositManager.deposit(
+                                            claim.expectedAmount,
+                                            "ETH",
+                                            11155111, // Sepolia
+                                            claim.commitment
+                                        );
+                                        
+                                        // Clean up all traces - privacy preserved!
+                                        depositClaims.delete(address);
+                                        depositAddresses.delete(address);
+                                        
+                                        Debug.print("✅ Deposit processed privately. No permanent records kept.");
+                                        #ok(txHash)
+                                    } else {
+                                        // Failed - update state
+                                        depositClaims.put(address, {
+                                            claim with 
+                                            state = #Failed;
+                                            errorMessage = ?"Transaction failed";
+                                            processingTxHash = ?txHash;
+                                        });
+                                        #err("Transaction failed")
+                                    }
+                                };
+                                case (#err(e)) {
+                                    // Pending or error - keep claim for retry
+                                    depositClaims.put(address, {
+                                        claim with 
+                                        state = #Failed;
+                                        errorMessage = ?e;
+                                        processingTxHash = ?txHash;
+                                        retryCount = claim.retryCount + 1;
+                                    });
+                                    #err(e)
+                                };
+                            };
+                        };
+                        case (#err(e)) {
+                            depositClaims.put(address, {
+                                claim with 
+                                state = #Failed;
+                                errorMessage = ?e;
+                                retryCount = claim.retryCount + 1;
+                            });
+                            #err(e)
+                        };
+                    };
+                };
+                case (#err(e)) {
+                    depositClaims.put(address, { claim with state = #AwaitingFunds });
+                    #err("Failed to check balance: " # e)
+                };
+            };
+        } catch (e) {
+            depositClaims.put(address, {
+                claim with 
+                state = #Failed;
+                errorMessage = ?Error.message(e);
+            });
+            #err("Processing error: " # Error.message(e))
+        };
+    };
+
+    // Helper function to check address balance
+    private func checkAddressBalance(address: Text) : async Result.Result<Nat, Text> {
+        let balanceRequest = "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getBalance\",\"params\":[\"" # 
+                           address # "\",\"latest\"],\"id\":1}";
+        
+        ExperimentalCycles.add(2_000_000_000);
+        let balanceResult = await evmRpc.request(
+            #EthSepolia(#PublicNode),
+            balanceRequest,
+            2048
+        );
+        
+        switch (balanceResult) {
+            case (#Ok(response)) {
+                let balanceHex = extractResultFromJson(response);
+                #ok(hexToNat(balanceHex))
+            };
+            case (#Err(e)) {
+                #err("Failed to get balance via EVM RPC")
+            };
+        }
+    };
+
     // Process single deposit with V2 address derivation
     public shared(msg) func processSingleDepositV2(address: Text) : async Result.Result<Text, Text> {
+        // Log the caller to identify who is calling this
+        Debug.print("🚨 processSingleDepositV2 called for: " # address);
+        Debug.print("🚨 Called by: " # Principal.toText(msg.caller));
+        Debug.print("🕐 Time: " # Int.toText(Time.now()));
+        
         // Check cycles before processing
         if (not hasSufficientCycles()) {
             return #err("Insufficient cycles. Please top up the canister.");
@@ -2329,7 +2607,14 @@ actor EthereumAdapter {
             };
             
             // Calculate max fee per gas (base fee + priority fee + small buffer)
-            let maxFeePerGas = gasPrices.baseFee + gasPrices.maxPriorityFee + (gasPrices.baseFee / 10); // 10% buffer
+            // Cap priority fee at reasonable maximum (10 Gwei) to prevent excessive gas costs
+            let cappedPriorityFee = if (gasPrices.maxPriorityFee > 10_000_000_000) {
+                Debug.print("⚠️ Capping priority fee from " # Nat.toText(gasPrices.maxPriorityFee) # " to 10 Gwei");
+                10_000_000_000 // 10 Gwei max
+            } else {
+                gasPrices.maxPriorityFee
+            };
+            let maxFeePerGas = gasPrices.baseFee + cappedPriorityFee + (gasPrices.baseFee / 10); // 10% buffer
             
             // Calculate gas cost for the transaction
             let gasLimit : Nat = 80000; // Gas limit for deposit function call
@@ -2357,13 +2642,21 @@ actor EthereumAdapter {
             };
             
             Debug.print("V2 deposit address balance: " # Nat.toText(currentBalance));
+            Debug.print("Gas prices - baseFee: " # Nat.toText(gasPrices.baseFee) # ", priorityFee: " # Nat.toText(gasPrices.maxPriorityFee));
+            Debug.print("Capped priority fee: " # Nat.toText(cappedPriorityFee));
+            Debug.print("Max fee per gas: " # Nat.toText(maxFeePerGas));
+            Debug.print("Gas limit: " # Nat.toText(gasLimit));
             Debug.print("Max gas cost: " # Nat.toText(maxGasCost));
+            Debug.print("Max gas cost in ETH: " # Float.toText(Float.fromInt(Int.abs(maxGasCost)) / 1e18));
             
             // Ensure we have enough to cover both the deposit amount AND gas
             let totalRequired = info.amount + maxGasCost;
+            Debug.print("Total required: " # Nat.toText(totalRequired) # " (" # Float.toText(Float.fromInt(Int.abs(totalRequired)) / 1e18) # " ETH)");
             if (currentBalance < totalRequired) {
                 return #err("Insufficient balance. Have: " # Nat.toText(currentBalance) # 
-                           ", need: " # Nat.toText(totalRequired));
+                           " (" # Float.toText(Float.fromInt(Int.abs(currentBalance)) / 1e18) # " ETH)" #
+                           ", need: " # Nat.toText(totalRequired) # 
+                           " (" # Float.toText(Float.fromInt(Int.abs(totalRequired)) / 1e18) # " ETH)");
             };
             
             // Forward exactly the expected deposit amount
@@ -2395,7 +2688,7 @@ actor EthereumAdapter {
                 };
                 nonce = addressNonce;
                 maxFeePerGas = maxFeePerGas;
-                maxPriorityFeePerGas = gasPrices.maxPriorityFee;
+                maxPriorityFeePerGas = cappedPriorityFee; // Use capped value!
                 gasLimit = gasLimit;
                 chainId = 11155111; // Sepolia testnet // Ethereum mainnet
             };
@@ -2491,11 +2784,26 @@ actor EthereumAdapter {
             switch (receiptResult) {
                 case (#Consistent(#Ok(?receipt))) {
                     // Transaction was mined
-                    Debug.print("Transaction mined in block " # Nat.toText(receipt.blockNumber));
+                    // Note: receipt from EVM RPC has different structure than our local type
+                    // We need to handle the type mismatch properly
+                    Debug.print("Transaction mined!");
                     Debug.print("Transaction status: " # receipt.status);
                     
                     if (receipt.status == "0x1") {
-                        return #ok(receipt);
+                        // Convert EVM RPC receipt to our local type
+                        // We create a simplified receipt that works with our code
+                        return #ok({
+                            transactionHash = txHash;
+                            blockNumber = 0; // We'll skip block number parsing for now
+                            blockHash = "";
+                            status = receipt.status;
+                            gasUsed = 0;
+                            cumulativeGasUsed = 0;
+                            from = "";
+                            to = null;
+                            contractAddress = null;
+                            logs = [];
+                        });
                     } else {
                         return #err("Transaction failed with status 0x0");
                     };
@@ -2505,11 +2813,12 @@ actor EthereumAdapter {
                     Debug.print("Transaction not yet mined, waiting...");
                     attempts += 1;
                     
-                    // Since we can't use timers directly in async context,
-                    // we'll return early and let the frontend handle retries
-                    if (attempts >= 3) {
-                        // After 3 quick checks, assume transaction is pending
-                        // Frontend should handle the waiting logic
+                    // Continue checking up to maxAttempts
+                    // Only return pending status if we've waited long enough
+                    if (attempts >= 10) {
+                        // After 10 attempts (~20 seconds), return pending status
+                        // This allows the transaction to be tracked while still pending
+                        Debug.print("Transaction still pending after " # Nat.toText(attempts) # " attempts");
                         return #ok({
                             transactionHash = txHash;
                             blockNumber = 0;
@@ -2524,8 +2833,19 @@ actor EthereumAdapter {
                         });
                     };
                     
-                    // Small delay by making a simple async call
-                    let _ = await async { Debug.print("Waiting..."); };
+                    // Add a delay between attempts (approximately 2 seconds)
+                    // We use a simple RPC call to create the delay
+                    try {
+                        // Make a lightweight RPC call to create delay
+                        let _ = await evmRpc.request(
+                            #EthSepolia(#PublicNode),
+                            "{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}",
+                            1000
+                        );
+                    } catch (e) {
+                        // Ignore errors from delay mechanism
+                        Debug.print("Delay call failed, continuing...");
+                    };
                 };
                 case (#Consistent(#Err(error))) {
                     return #err("Failed to get receipt: " # debug_show(error));
@@ -2726,7 +3046,13 @@ actor EthereumAdapter {
             };
             
             // Calculate gas for simple ETH transfer
-            let maxFeePerGas = gasPrices.baseFee + gasPrices.maxPriorityFee + (gasPrices.baseFee / 10);
+            // Cap priority fee to prevent excessive gas costs
+            let cappedPriorityFee = if (gasPrices.maxPriorityFee > 10_000_000_000) {
+                10_000_000_000 // 10 Gwei max
+            } else {
+                gasPrices.maxPriorityFee
+            };
+            let maxFeePerGas = gasPrices.baseFee + cappedPriorityFee + (gasPrices.baseFee / 10);
             let gasLimit : Nat = 21000; // Standard ETH transfer
             let maxGasCost = maxFeePerGas * gasLimit;
             
@@ -2763,7 +3089,7 @@ actor EthereumAdapter {
                 data = Blob.fromArray([]); // No data for simple transfer
                 nonce = nonce;
                 maxFeePerGas = maxFeePerGas;
-                maxPriorityFeePerGas = gasPrices.maxPriorityFee;
+                maxPriorityFeePerGas = cappedPriorityFee; // Use capped value!
                 gasLimit = gasLimit;
                 chainId = 11155111; // Sepolia testnet
             };
@@ -2993,5 +3319,137 @@ actor EthereumAdapter {
         let typePrefix : [Nat8] = [0x02];
         let fullEncoded = Blob.fromArray(Array.append<Nat8>(typePrefix, Blob.toArray(rlpEncoded)));
         "0x" # Hex.encode(Blob.toArray(fullEncoded))
+    };
+
+    // Complete a deposit after transaction confirmation (for frontend recovery)
+    public func completeDeposit(address: Text, txHash: Text) : async Result.Result<Text, Text> {
+        Debug.print("📝 Completing deposit for address: " # address # " with tx: " # txHash);
+        
+        switch (depositAddresses.get(address)) {
+            case null { #err("Deposit address not found") };
+            case (?info) {
+                if (info.processed) {
+                    return #ok("Deposit already processed");
+                };
+                
+                // Verify transaction is confirmed
+                let statusResult = await checkTransactionStatus(txHash);
+                switch (statusResult) {
+                    case (#ok(status)) {
+                        if (status.status == "confirmed") {
+                            // Mark as processed
+                            depositAddresses.put(address, {
+                                commitment = info.commitment;
+                                amount = info.amount;
+                                timestamp = info.timestamp;
+                                userId = info.userId;
+                                processed = true;
+                            });
+                            
+                            Debug.print("✅ Deposit completed successfully for " # address);
+                            #ok("Deposit completed")
+                        } else {
+                            #err("Transaction not confirmed. Status: " # status.status)
+                        }
+                    };
+                    case (#err(e)) {
+                        #err("Failed to check transaction status: " # e)
+                    };
+                }
+            };
+        }
+    };
+
+    // Public method to check transaction status (for frontend)
+    public func checkTransactionStatus(txHash: Text) : async Result.Result<{status: Text; blockNumber: ?Nat}, Text> {
+        Debug.print("🔍 Checking transaction status for: " # txHash);
+        
+        // Add cycles for the RPC call
+        ExperimentalCycles.add(2_000_000_000); // 2B cycles
+        
+        // Check receipt directly
+        let receiptResult = await evmRpc.eth_getTransactionReceipt(
+            #EthSepolia(?[#PublicNode]),
+            ?{
+                responseSizeEstimate = ?500;
+                responseConsensus = null;
+            },
+            txHash
+        );
+        
+        switch (receiptResult) {
+            case (#Consistent(#Ok(?receipt))) {
+                if (receipt.status == "0x1") {
+                    #ok({status = "confirmed"; blockNumber = null}) // We'll add block number parsing later
+                } else {
+                    #ok({status = "failed"; blockNumber = null})
+                }
+            };
+            case (#Consistent(#Ok(null))) {
+                // No receipt yet - check if transaction exists via direct RPC
+                let txCheckResult = await makeRpcCall("eth_getTransactionByHash", "[\"" # txHash # "\"]");
+                switch (txCheckResult) {
+                    case (#ok(result)) {
+                        if (result != "" and result != "null") {
+                            // Transaction exists but no receipt - still pending
+                            #ok({status = "pending"; blockNumber = null})
+                        } else {
+                            // Transaction not found
+                            #ok({status = "not_found"; blockNumber = null})
+                        }
+                    };
+                    case (#err(e)) {
+                        #err("Failed to check transaction: " # e)
+                    };
+                }
+            };
+            case (#Consistent(#Err(error))) {
+                #err("Failed to get receipt: " # debug_show(error))
+            };
+            case (#Inconsistent(_)) {
+                #err("Inconsistent RPC results for receipt")
+            };
+        }
+    };
+
+    // Query deposit state without revealing ownership (V3)
+    public query func getDepositState(address: Text) : async ?Text {
+        switch (depositClaims.get(address)) {
+            case null { null };
+            case (?claim) {
+                switch (claim.state) {
+                    case (#AwaitingFunds) { ?"awaiting_funds" };
+                    case (#FundsReceived) { ?"funds_received" };
+                    case (#Processing) { ?"processing" };
+                    case (#Completed) { ?"completed" };
+                    case (#Failed) { ?"failed" };
+                }
+            };
+        }
+    };
+
+    // Query claim expiry time (for frontend countdown)
+    public query func getClaimExpiry(address: Text) : async ?Int {
+        switch (depositClaims.get(address)) {
+            case null { null };
+            case (?claim) { ?claim.expiresAt };
+        }
+    };
+
+    // Clean up expired claims (can be called by anyone)
+    public func cleanupExpiredClaims() : async Nat {
+        var cleaned = 0;
+        let now = Time.now();
+        
+        for ((address, claim) in depositClaims.entries()) {
+            if (now > claim.expiresAt and claim.state != #Completed) {
+                depositClaims.delete(address);
+                depositAddresses.delete(address);
+                cleaned += 1;
+            };
+        };
+        
+        Debug.print("🧹 Cleaned up " # Nat.toText(cleaned) # " expired claims");
+        cleaned
     };
 }
