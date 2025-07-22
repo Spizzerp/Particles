@@ -81,7 +81,7 @@ actor EthereumAdapter {
 
     // Separate storage for privacy
     private var depositClaims = Map.HashMap<Text, DepositClaim>(100, Text.equal, Text.hash);
-    private let CLAIM_EXPIRY_TIME : Int = 10 * 60 * 1_000_000_000; // 10 minutes in nanoseconds
+    private let CLAIM_EXPIRY_TIME : Int = 30 * 60 * 1_000_000_000; // 30 minutes in nanoseconds
 
     private type EthereumTransaction = {
         to: Text;
@@ -2279,6 +2279,14 @@ actor EthereumAdapter {
             switch (balanceResult) {
                 case (#ok(balance)) {
                     if (balance < claim.expectedAmount) {
+                        // Check if this might be a leftover from an already processed deposit
+                        if (balance < claim.expectedAmount / 10) { // Less than 10% suggests it's leftover gas
+                            // Clean up the claim - it was likely already processed
+                            depositClaims.delete(address);
+                            depositAddresses.delete(address);
+                            return #err("Deposit already processed - insufficient funds");
+                        };
+                        
                         // Update state back to awaiting funds
                         depositClaims.put(address, { claim with state = #AwaitingFunds });
                         return #err("Insufficient funds. Expected: " # Nat.toText(claim.expectedAmount) # ", found: " # Nat.toText(balance));

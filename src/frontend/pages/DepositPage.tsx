@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Principal } from '@dfinity/principal';
 import { getDepositManager, getEthereumAdapter } from '../services/actorFactory';
 import { sha256 } from '@noble/hashes/sha256';
@@ -25,6 +25,9 @@ const DepositPage: React.FC = () => {
     estimatedTotalCost: bigint;
     estimatedTotalCostEth: string;
   } | null>(null);
+  
+  // Ref to control monitoring loop
+  const shouldMonitor = useRef(false);
 
   const chains = [
     { id: 'ICP', name: 'Internet Computer', icon: '🌐' },
@@ -63,6 +66,13 @@ const DepositPage: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [step, timeLeft]);
+  
+  // Cleanup monitoring on unmount
+  useEffect(() => {
+    return () => {
+      shouldMonitor.current = false;
+    };
+  }, []);
 
   // Recovery mechanism for page refreshes
   useEffect(() => {
@@ -329,6 +339,7 @@ const DepositPage: React.FC = () => {
 
   const handleDepositDetected = async () => {
     setStep('waiting');
+    shouldMonitor.current = true;  // Start monitoring
     console.log('🔍 === MONITORING FOR DEPOSIT ===');
     console.log('📍 Deposit address:', depositAddress);
     console.log('💰 Expected amount:', selectedAmount, 'ETH');
@@ -341,6 +352,12 @@ const DepositPage: React.FC = () => {
       
       const checkForDeposit = async () => {
         try {
+          // Stop checking if monitoring was disabled
+          if (!shouldMonitor.current) {
+            console.log('⏹️ Stopping deposit check - monitoring disabled');
+            return;
+          }
+          
           console.log(`🔄 Checking for deposit... (Attempt ${attempts + 1}/${maxAttempts})`);
           
           // First check if funds have arrived at the deposit address
@@ -391,6 +408,7 @@ const DepositPage: React.FC = () => {
                         
                         // Register with deposit manager
                         await registerDeposit(txHash);
+                        shouldMonitor.current = false;  // Stop monitoring
                         return;
                       } else if (txStatus.status === 'failed') {
                         throw new Error('Transaction failed on-chain');
@@ -444,6 +462,40 @@ const DepositPage: React.FC = () => {
             }
           } else {
             console.log('⚠️ Processing error:', processResult.err);
+            
+            // Check if deposit was already processed by looking for it in the system
+            if (processResult.err.includes('Insufficient funds') || 
+                processResult.err.includes('already processed') ||
+                processResult.err.includes('Deposit not found')) {
+              console.log('🔍 Checking if deposit exists in the system...');
+              
+              // Check if deposit is already in the system
+              const depositManager = await getDepositManager();
+              const allDeposits = await depositManager.getAllDeposits();
+              const pendingData = JSON.parse(sessionStorage.getItem('pending_deposit') || '{}');
+              const found = allDeposits.find(d => d.commitment === pendingData.commitment);
+              
+              if (found) {
+                console.log('✅ Deposit found in system with ID:', found.id, 'and leaf index:', found.leafIndex);
+                // Create complete deposit note
+                const fullCommitment = JSON.stringify({
+                  ...pendingData,
+                  depositId: found.id.toString(),
+                  leafIndex: found.leafIndex.toString()
+                });
+                
+                setCommitment(fullCommitment);
+                // Try to find the transaction hash
+                const pendingTx = sessionStorage.getItem('pending_tx');
+                setTxHash(pendingTx || '0x' + '0'.repeat(64));
+                setStep('complete');
+                
+                // Clear storage
+                sessionStorage.removeItem('pending_tx');
+                sessionStorage.removeItem('pending_deposit');
+                return;
+              }
+            }
             
             // Check various error conditions
             if (processResult.err.includes('Not authorized')) {
@@ -558,16 +610,17 @@ const DepositPage: React.FC = () => {
           }
           
           attempts++;
-          if (attempts < maxAttempts) {
+          if (attempts < maxAttempts && shouldMonitor.current) {
             setTimeout(checkForDeposit, 5000); // Check every 5 seconds
-          } else {
+          } else if (shouldMonitor.current) {
             alert('Deposit timeout. Please try again.');
+            shouldMonitor.current = false;  // Stop monitoring
             setStep('address');
           }
         } catch (error) {
           console.error('Error checking deposits:', error);
           attempts++;
-          if (attempts < maxAttempts) {
+          if (attempts < maxAttempts && shouldMonitor.current) {
             setTimeout(checkForDeposit, 5000);
           }
         }
@@ -610,6 +663,7 @@ const DepositPage: React.FC = () => {
           
           setCommitment(fullCommitment);
           setTxHash(txHash || '0x' + bytesToHex(crypto.getRandomValues(new Uint8Array(32))));
+          shouldMonitor.current = false;  // Stop monitoring
           setStep('complete');
           
           // Clear temporary storage

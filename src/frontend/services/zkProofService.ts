@@ -99,6 +99,10 @@ export async function generateWithdrawalProof(
     ? leafIndex 
     : parseInt(depositData.depositId, 10);
   
+  console.log('Using leaf index:', index);
+  console.log('Merkle proof length:', merkleProof.length);
+  console.log('First few merkle proof elements:', merkleProof.slice(0, 3));
+  
   // Check if nullifierHash is missing (old deposits) and compute it
   if (!depositData.nullifierHash) {
     console.log('Computing nullifierHash for legacy deposit...');
@@ -110,6 +114,20 @@ export async function generateWithdrawalProof(
   // Generate the PLONK proof
   // Use the exact amountWei that was used in the commitment during deposit
   const amountForProof = depositData.amountWei || depositData.amount;
+  
+  // Debug: Verify commitment calculation
+  console.log('=== COMMITMENT VERIFICATION ===');
+  console.log('Secret:', depositData.secret);
+  console.log('Nullifier:', depositData.nullifier);
+  console.log('Amount for proof:', amountForProof);
+  
+  // Compute commitment to verify it matches
+  const { computeCommitment } = await import('../utils/mimc');
+  const computedCommitment = '0x' + BigInt(computeCommitment(depositData.secret, depositData.nullifier, amountForProof)).toString(16).padStart(64, '0');
+  console.log('Computed commitment:', computedCommitment);
+  console.log('Expected commitment:', depositData.commitment);
+  console.log('Commitments match:', computedCommitment === depositData.commitment);
+  
   const generatedProof = await plonkProverService.generateWithdrawalProof(
     depositData.secret,
     depositData.nullifier,
